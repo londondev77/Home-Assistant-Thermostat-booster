@@ -27,3 +27,4 @@ To do
 22.	Check services – what has been created?
 23.	All rooms boost
 24.	Make the temperature slider dynamic by taking the min and max settings from the thermostat?
+25. Pre-reqs on adding integration
