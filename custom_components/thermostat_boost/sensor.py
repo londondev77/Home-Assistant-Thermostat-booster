@@ -54,7 +54,10 @@ async def async_setup_entry(
     if not hass.data[DOMAIN].get(services_key):
         platform.async_register_entity_service(
             SERVICE_TIMER_START,
-            {vol.Optional("minutes"): vol.Coerce(float)},
+            {
+                vol.Optional("hours"): vol.Coerce(float),
+                vol.Optional("minutes"): vol.Coerce(float),
+            },
             "async_start_timer",
         )
         platform.async_register_entity_service(
@@ -143,18 +146,25 @@ class BoostFinishSensor(ThermostatBoostEntity, SensorEntity, RestoreEntity):
         """Return the current value."""
         return self._native_value
 
-    async def async_start_timer(self, minutes: float | None = None) -> None:
-        """Start the timer using minutes or the time selector value."""
+    async def async_start_timer(
+        self,
+        hours: float | None = None,
+        minutes: float | None = None,
+    ) -> None:
+        """Start the timer using hours/minutes or the time selector value."""
         if self._timer is None:
             return
 
-        if minutes is None:
-            minutes = _get_time_selector_value(self.hass, self._entry.entry_id)
+        if hours is None and minutes is None:
+            hours = _get_time_selector_value(self.hass, self._entry.entry_id)
 
-        if minutes is None:
-            minutes = 0.0
+        if hours is None and minutes is None:
+            hours = 0.0
 
-        await self._timer.async_start(timedelta(minutes=float(minutes)))
+        if hours is None and minutes is not None:
+            await self._timer.async_start(timedelta(minutes=float(minutes)))
+        else:
+            await self._timer.async_start(timedelta(hours=float(hours)))
 
     async def async_cancel_timer(self) -> None:
         """Cancel the timer."""
@@ -170,14 +180,14 @@ class BoostFinishSensor(ThermostatBoostEntity, SensorEntity, RestoreEntity):
         temperature_c = _get_number_value(
             self.hass, self._entry.entry_id, UNIQUE_ID_BOOST_TEMPERATURE
         )
-        duration_minutes = _get_number_value(
+        duration_hours = _get_number_value(
             self.hass, self._entry.entry_id, UNIQUE_ID_TIME_SELECTOR
         )
 
         if temperature_c is None:
             return
-        if duration_minutes is None:
-            duration_minutes = 0.0
+        if duration_hours is None:
+            duration_hours = 0.0
 
         target_temp = temperature_c
         if self.hass.config.units.temperature_unit != UnitOfTemperature.CELSIUS:
@@ -198,7 +208,7 @@ class BoostFinishSensor(ThermostatBoostEntity, SensorEntity, RestoreEntity):
             blocking=True,
         )
 
-        await self._timer.async_start(timedelta(minutes=float(duration_minutes)))
+        await self._timer.async_start(timedelta(hours=float(duration_hours)))
 
         boost_active_entity_id = _get_entity_id(
             self.hass, self._entry.entry_id, UNIQUE_ID_BOOST_ACTIVE

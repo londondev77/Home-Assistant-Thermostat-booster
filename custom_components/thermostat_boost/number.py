@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfTemperature, UnitOfTime
+from homeassistant.const import UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -68,6 +68,7 @@ class BoostTemperatureNumber(ThermostatBoostEntity, NumberEntity, RestoreEntity)
     _attr_native_min_value = 5.0
     _attr_native_max_value = 25.0
     _attr_native_step = 0.5
+    _attr_native_unit_of_measurement = "C"
 
     def __init__(
         self,
@@ -87,7 +88,7 @@ class BoostTemperatureNumber(ThermostatBoostEntity, NumberEntity, RestoreEntity)
             hass, thermostat_entity_id
         )
 
-        self._attr_unit_of_measurement = UnitOfTemperature.CELSIUS
+        self._attr_unit_of_measurement = "C"
 
     async def async_added_to_hass(self) -> None:
         """Restore state on startup."""
@@ -115,9 +116,10 @@ class BoostTimeSelectorNumber(ThermostatBoostEntity, NumberEntity, RestoreEntity
     _attr_icon = "mdi:timer-sand"
     _attr_mode = NumberMode.SLIDER
     _attr_native_min_value = 0.0
-    _attr_native_max_value = 60.0
-    _attr_native_step = 1.0
-    _attr_unit_of_measurement = UnitOfTime.MINUTES
+    _attr_native_max_value = 24.0
+    _attr_native_step = 0.5
+    _attr_native_unit_of_measurement = "hrs"
+    _attr_unit_of_measurement = "hrs"
 
     def __init__(
         self, hass: HomeAssistant, entry: ConfigEntry, data: dict
