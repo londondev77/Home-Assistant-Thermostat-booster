@@ -16,12 +16,11 @@ Done but needs testing
 15.	Add preset dropdowns
 16.	Start building up card using bubbles
 17.	Get the countdown working properly on the summary card
-
-
-To do
 18.	Reinstate 0 to 24 hours step 0.5
 19.	Add units to sliders
-20.	Slight styling issue on countdown
+
+To do
+20.	Slight styling issue on countdown. Also shouldn't it go blue?
 21.	Ability to set name and icon when adding card
 22.	Check services – what has been created?
 23.	All rooms boost
