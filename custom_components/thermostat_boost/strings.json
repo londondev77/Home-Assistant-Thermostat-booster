@@ -1,0 +1,17 @@
+{
+  "title": "Thermostat Boost",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Select a thermostat",
+        "description": "Choose the thermostat you want to control.",
+        "data": {
+          "thermostat": "Thermostat"
+        }
+      }
+    },
+    "abort": {
+      "no_thermostats": "No thermostats were found."
+    }
+  }
+}

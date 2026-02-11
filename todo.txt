@@ -1,0 +1,28 @@
+Done but needs testing
+1.	Test when time reaches 0.
+2.	Test with multiple thermostats – seems to work
+3.	To aid testing, change time duration range to 0 to 60 mins with step 1 temporarily 
+4.	Remove debug – to be tested
+5.	Hide both sliders when boost is active
+6.	Remove clicking on entity name – prob not needed
+7.	Remove boost timer entity
+8.	Boost finish is unknown when boost isn’t active. Can it be nicer?
+9.	Add schedules
+10.	Ensure scheduler and scheduler card are added by thermostat
+11.	Start boost  turn off all schedules
+12.	End boost  turn on all schedules
+13.	Take state of schedules
+14.	Rather than turn on all schedules, restore scene
+15.	Add preset dropdowns
+16.	Start building up card using bubbles
+17.	Get the countdown working properly on the summary card
+
+
+To do
+18.	Reinstate 0 to 24 hours step 0.5
+19.	Add units to sliders
+20.	Slight styling issue on countdown
+21.	Ability to set name and icon when adding card
+22.	Check services – what has been created?
+23.	All rooms boost
+24.	

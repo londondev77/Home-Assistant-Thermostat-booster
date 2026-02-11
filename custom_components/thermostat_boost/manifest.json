@@ -1,0 +1,14 @@
+{
+  "domain": "thermostat_boost",
+  "name": "Thermostat Boost",
+  "version": "0.1.0",
+  "config_flow": true,
+  "import_executor": true,
+  "documentation": "https://github.com/REPLACE_WITH_YOUR_GITHUB/thermostat_boost",
+  "issue_tracker": "https://github.com/REPLACE_WITH_YOUR_GITHUB/thermostat_boost/issues",
+  "requirements": [],
+  "codeowners": [
+    "@REPLACE_WITH_YOUR_GITHUB"
+  ],
+  "iot_class": "local_polling"
+}
