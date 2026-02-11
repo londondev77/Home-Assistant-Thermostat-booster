@@ -20,8 +20,10 @@ Done but needs testing
 19.	Add units to sliders
 
 To do
-20.	Slight styling issue on countdown. Also shouldn't it go blue?
+19a. Ensure thermostat is switched on. Maybe when adding integration?
+20.	Slight styling issue on countdown. Also shouldn't it go blue - it's because it needs to be made active if boost is active. As it's not a timer anymore, it isn't active.
 21.	Ability to set name and icon when adding card
+22. Add icon for integration
 22.	Check services – what has been created?
 23.	All rooms boost
 24.	Make the temperature slider dynamic by taking the min and max settings from the thermostat?
