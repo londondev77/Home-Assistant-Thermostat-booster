@@ -400,6 +400,13 @@
         ],
       });
 
+      cards.push({
+        type: "heading",
+        icon: "mdi:rocket-launch",
+        heading_style: "title",
+        heading: "Boost",
+      });
+
       if (resolved.boostTemperatureEntityId) {
         cards.push({
           type: "conditional",

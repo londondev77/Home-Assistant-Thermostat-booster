@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import logging
-
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_call_later
@@ -20,7 +18,6 @@ from .const import (
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from .timer_manager import async_get_timer_registry
 
-_LOGGER = logging.getLogger(__name__)
 _SNAPSHOT_STORAGE_VERSION = 1
 _SNAPSHOT_STORAGE_KEY = f"{DOMAIN}.scheduler_snapshot"
 _SNAPSHOT_RESTORE_RETRY_DELAY = 15
@@ -143,12 +140,8 @@ async def _async_retrigger_scheduler_switches(
             {"entity_id": available_entities},
             blocking=True,
         )
-    except HomeAssistantError as err:
-        _LOGGER.debug(
-            "Scheduler retrigger for %s failed: %s",
-            entry_id,
-            err,
-        )
+    except HomeAssistantError:
+        pass
 
 
 async def async_create_scheduler_scene(
@@ -195,11 +188,6 @@ async def async_restore_scheduler_snapshot(hass: HomeAssistant, entry_id: str) -
         )
     ]
     if missing_entities:
-        _LOGGER.debug(
-            "Deferring scheduler snapshot restore for %s; unavailable entities: %s",
-            entry_id,
-            missing_entities,
-        )
         _schedule_snapshot_restore_retry(hass, entry_id)
         return
 
@@ -221,13 +209,7 @@ async def async_restore_scheduler_snapshot(hass: HomeAssistant, entry_id: str) -
                 {"entity_id": to_turn_off},
                 blocking=True,
             )
-    except HomeAssistantError as err:
-        _LOGGER.debug(
-            "Scheduler snapshot restore for %s failed, retrying in %ss: %s",
-            entry_id,
-            _SNAPSHOT_RESTORE_RETRY_DELAY,
-            err,
-        )
+    except HomeAssistantError:
         _schedule_snapshot_restore_retry(hass, entry_id)
         return
 
