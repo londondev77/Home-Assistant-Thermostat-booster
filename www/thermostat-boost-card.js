@@ -495,7 +495,7 @@
             {
               condition: "numeric_state",
               entity: resolved.boostTimeEntityId,
-              above: 0.1,
+              above: 0,
             },
           ],
           card: {
