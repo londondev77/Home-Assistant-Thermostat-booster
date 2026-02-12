@@ -6,7 +6,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.const import Platform
 from homeassistant.helpers import entity_registry as er
-from .boost_actions import async_finish_boost_for_entry
+from .boost_actions import async_clear_scheduler_snapshot, async_finish_boost_for_entry
 from .const import (
     CONF_THERMOSTAT,
     DATA_THERMOSTAT_NAME,
@@ -68,6 +68,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         registry = await async_get_timer_registry(hass)
-        await registry.async_remove(entry.entry_id)
+        await registry.async_unload_entry(entry.entry_id)
         hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
     return unload_ok
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Remove a Thermostat Boost config entry and clear persisted state."""
+    registry = await async_get_timer_registry(hass)
+    await registry.async_remove(entry.entry_id)
+    await async_clear_scheduler_snapshot(hass, entry.entry_id)

@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 
@@ -16,8 +20,13 @@ from .const import (
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from .timer_manager import async_get_timer_registry
 
+_LOGGER = logging.getLogger(__name__)
 _SNAPSHOT_STORAGE_VERSION = 1
 _SNAPSHOT_STORAGE_KEY = f"{DOMAIN}.scheduler_snapshot"
+_SNAPSHOT_RESTORE_RETRY_DELAY = 15
+_SNAPSHOT_RESTORE_PENDING_KEY = "snapshot_restore_pending"
+_SNAPSHOT_RETRIGGER_DELAY = 10
+_SNAPSHOT_RETRIGGER_PENDING_KEY = "snapshot_retrigger_pending"
 
 
 def _matches_tag(tags, thermostat_name: str) -> bool:
@@ -61,6 +70,87 @@ async def _load_snapshot_store(
     return store, data
 
 
+def _get_snapshot_restore_pending(hass: HomeAssistant) -> set[str]:
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    return domain_data.setdefault(_SNAPSHOT_RESTORE_PENDING_KEY, set())
+
+
+def _get_snapshot_retrigger_pending(hass: HomeAssistant) -> set[str]:
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    return domain_data.setdefault(_SNAPSHOT_RETRIGGER_PENDING_KEY, set())
+
+
+def _schedule_snapshot_restore_retry(hass: HomeAssistant, entry_id: str) -> None:
+    pending = _get_snapshot_restore_pending(hass)
+    if entry_id in pending:
+        return
+    pending.add(entry_id)
+
+    @callback
+    def _retry(_now) -> None:
+        pending.discard(entry_id)
+        hass.add_job(async_restore_scheduler_snapshot(hass, entry_id))
+
+    async_call_later(hass, _SNAPSHOT_RESTORE_RETRY_DELAY, _retry)
+
+
+def _schedule_scheduler_retrigger(
+    hass: HomeAssistant, entry_id: str, to_turn_on: list[str]
+) -> None:
+    pending = _get_snapshot_retrigger_pending(hass)
+    if entry_id in pending:
+        return
+
+    target_entities = sorted({entity_id for entity_id in to_turn_on if entity_id})
+    if not target_entities:
+        return
+    pending.add(entry_id)
+
+    @callback
+    def _retry(_now) -> None:
+        pending.discard(entry_id)
+        hass.add_job(
+            _async_retrigger_scheduler_switches(hass, entry_id, target_entities)
+        )
+
+    async_call_later(hass, _SNAPSHOT_RETRIGGER_DELAY, _retry)
+
+
+async def _async_retrigger_scheduler_switches(
+    hass: HomeAssistant, entry_id: str, entity_ids: list[str]
+) -> None:
+    available_entities = [
+        entity_id
+        for entity_id in entity_ids
+        if (
+            (state := hass.states.get(entity_id)) is not None
+            and state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE)
+        )
+    ]
+    if not available_entities:
+        return
+
+    try:
+        await hass.services.async_call(
+            "switch",
+            "turn_off",
+            {"entity_id": available_entities},
+            blocking=True,
+        )
+        await hass.services.async_call(
+            "switch",
+            "turn_on",
+            {"entity_id": available_entities},
+            blocking=True,
+        )
+    except HomeAssistantError as err:
+        _LOGGER.debug(
+            "Scheduler retrigger for %s failed: %s",
+            entry_id,
+            err,
+        )
+
+
 async def async_create_scheduler_scene(
     hass: HomeAssistant, entry_id: str, thermostat_name: str
 ) -> list[str]:
@@ -85,31 +175,76 @@ async def async_create_scheduler_scene(
 async def async_restore_scheduler_snapshot(hass: HomeAssistant, entry_id: str) -> None:
     """Restore scheduler switch states from persistent storage."""
     store, data = await _load_snapshot_store(hass)
-    snapshot = data.pop(entry_id, None)
+    snapshot = data.get(entry_id)
     if snapshot is None:
+        _get_snapshot_restore_pending(hass).discard(entry_id)
         return
-    await store.async_save(data)
 
     if not snapshot:
+        data.pop(entry_id, None)
+        await store.async_save(data)
+        _get_snapshot_restore_pending(hass).discard(entry_id)
+        return
+
+    missing_entities = [
+        entity_id
+        for entity_id in snapshot
+        if (
+            (state := hass.states.get(entity_id)) is None
+            or state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE)
+        )
+    ]
+    if missing_entities:
+        _LOGGER.debug(
+            "Deferring scheduler snapshot restore for %s; unavailable entities: %s",
+            entry_id,
+            missing_entities,
+        )
+        _schedule_snapshot_restore_retry(hass, entry_id)
         return
 
     to_turn_on = [entity_id for entity_id, state in snapshot.items() if state == "on"]
     to_turn_off = [entity_id for entity_id, state in snapshot.items() if state != "on"]
 
-    if to_turn_on:
-        await hass.services.async_call(
-            "switch",
-            "turn_on",
-            {"entity_id": to_turn_on},
-            blocking=True,
+    try:
+        if to_turn_on:
+            await hass.services.async_call(
+                "switch",
+                "turn_on",
+                {"entity_id": to_turn_on},
+                blocking=True,
+            )
+        if to_turn_off:
+            await hass.services.async_call(
+                "switch",
+                "turn_off",
+                {"entity_id": to_turn_off},
+                blocking=True,
+            )
+    except HomeAssistantError as err:
+        _LOGGER.debug(
+            "Scheduler snapshot restore for %s failed, retrying in %ss: %s",
+            entry_id,
+            _SNAPSHOT_RESTORE_RETRY_DELAY,
+            err,
         )
-    if to_turn_off:
-        await hass.services.async_call(
-            "switch",
-            "turn_off",
-            {"entity_id": to_turn_off},
-            blocking=True,
-        )
+        _schedule_snapshot_restore_retry(hass, entry_id)
+        return
+
+    data.pop(entry_id, None)
+    await store.async_save(data)
+    _get_snapshot_restore_pending(hass).discard(entry_id)
+    _schedule_scheduler_retrigger(hass, entry_id, to_turn_on)
+
+
+async def async_clear_scheduler_snapshot(hass: HomeAssistant, entry_id: str) -> None:
+    """Clear stored scheduler snapshot for an entry."""
+    store, data = await _load_snapshot_store(hass)
+    if entry_id in data:
+        data.pop(entry_id, None)
+        await store.async_save(data)
+    _get_snapshot_restore_pending(hass).discard(entry_id)
+    _get_snapshot_retrigger_pending(hass).discard(entry_id)
 
 
 @callback

@@ -145,6 +145,12 @@ class BoostTimer:
         if callable(callback):
             self.hass.async_create_task(callback(self.hass, self.entry_id))
 
+    @callback
+    def unload(self) -> None:
+        """Unload timer callbacks without clearing persisted state."""
+        self._cancel_schedule()
+        self._callbacks.clear()
+
 
 class TimerRegistry:
     """Registry for per-entry timers with persistent storage."""
@@ -217,6 +223,12 @@ class TimerRegistry:
             await self._timers[entry_id].async_cancel()
             self._timers.pop(entry_id, None)
         await self.async_set_end(entry_id, None)
+
+    async def async_unload_entry(self, entry_id: str) -> None:
+        """Unload a timer without clearing persisted state."""
+        timer = self._timers.pop(entry_id, None)
+        if timer is not None:
+            timer.unload()
 
 
 async def async_get_timer_registry(hass: HomeAssistant) -> TimerRegistry:
