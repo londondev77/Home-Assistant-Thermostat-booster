@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import timedelta
-import re
 from typing import Callable
 
 import voluptuous as vol
@@ -41,12 +40,21 @@ from .const import (
 from .entity_base import ThermostatBoostEntity
 from .timer_manager import async_get_timer_registry
 
-_HMS_PATTERN = re.compile(r"^(?P<hours>\d+):(?P<minutes>[0-5]\d):(?P<seconds>[0-5]\d)$")
 _START_BOOST_SERVICE_SCHEMA = vol.Schema(
     {
         vol.Optional("device_id"): vol.Any(str, [str]),
         vol.Optional("entity_id"): vol.Any(str, [str]),
-        vol.Optional("time"): str,
+        vol.Optional("time"): vol.Any(
+            None,
+            str,
+            {
+                vol.Optional("days", default=0): vol.Coerce(int),
+                vol.Optional("hours", default=0): vol.Coerce(int),
+                vol.Optional("minutes", default=0): vol.Coerce(int),
+                vol.Optional("seconds", default=0): vol.Coerce(int),
+                vol.Optional("milliseconds", default=0): vol.Coerce(int),
+            },
+        ),
         vol.Optional("temperature_c"): vol.Coerce(float),
     },
     extra=vol.ALLOW_EXTRA,
@@ -221,7 +229,7 @@ class BoostFinishSensor(ThermostatBoostEntity, SensorEntity, RestoreEntity):
 
     async def async_start_boost(
         self,
-        time: str | None = None,
+        time: dict | str | None = None,
         temperature_c: float | None = None,
     ) -> None:
         """Start boost: set temperature, start timer, mark active."""
@@ -316,7 +324,7 @@ async def async_start_boost_for_entry(
     hass: HomeAssistant,
     entry_id: str,
     *,
-    time: str | None = None,
+    time: dict | str | None = None,
     temperature_c: float | None = None,
 ) -> None:
     data = hass.data.get(DOMAIN, {}).get(entry_id)
@@ -341,7 +349,7 @@ async def async_start_boost_for_entry(
             duration_hours = 0.0
         duration = timedelta(hours=float(duration_hours))
     else:
-        duration = _parse_hms_duration(time)
+        duration = _parse_duration_value(time)
 
     target_temp = temperature_c
     if hass.config.units.temperature_unit != UnitOfTemperature.CELSIUS:
@@ -384,17 +392,32 @@ async def async_start_boost_for_entry(
         )
 
 
-def _parse_hms_duration(value: str) -> timedelta:
-    """Parse duration in HH:MM:SS format and reject zero duration."""
-    match = _HMS_PATTERN.fullmatch(value.strip())
-    if match is None:
-        raise HomeAssistantError("time must be in HH:MM:SS format.")
+def _parse_duration_value(value) -> timedelta:
+    """Parse duration from selector object or HH:MM:SS string and reject zero."""
+    if isinstance(value, dict):
+        duration = timedelta(
+            days=int(value.get("days", 0) or 0),
+            hours=int(value.get("hours", 0) or 0),
+            minutes=int(value.get("minutes", 0) or 0),
+            seconds=int(value.get("seconds", 0) or 0),
+            milliseconds=int(value.get("milliseconds", 0) or 0),
+        )
+    elif isinstance(value, str):
+        parts = value.strip().split(":")
+        if len(parts) != 3:
+            raise HomeAssistantError("time must be in HH:MM:SS format.")
+        try:
+            hours = int(parts[0])
+            minutes = int(parts[1])
+            seconds = int(parts[2])
+        except (TypeError, ValueError):
+            raise HomeAssistantError("time must be in HH:MM:SS format.") from None
+        if minutes < 0 or minutes > 59 or seconds < 0 or seconds > 59 or hours < 0:
+            raise HomeAssistantError("time must be in HH:MM:SS format.")
+        duration = timedelta(hours=hours, minutes=minutes, seconds=seconds)
+    else:
+        raise HomeAssistantError("time must be a duration selector value.")
 
-    duration = timedelta(
-        hours=int(match.group("hours")),
-        minutes=int(match.group("minutes")),
-        seconds=int(match.group("seconds")),
-    )
     if duration.total_seconds() <= 0:
         raise HomeAssistantError("time cannot be 00:00:00.")
     return duration

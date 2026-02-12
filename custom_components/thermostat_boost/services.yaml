@@ -37,12 +37,11 @@ start_boost:
         device:
           integration: thermostat_boost
     time:
-      name: Time (HH:MM:SS)
-      description: Optional. Overrides Boost Time Selector when provided. Cannot be 00:00:00.
-      example: "00:30:00"
+      name: Time
+      description: Optional. Overrides Boost Time Selector when provided. Uses duration selector values (days/hours/minutes/seconds). Cannot be zero.
       selector:
         duration:
-            allow_negative: false
+          allow_negative: false
     temperature_c:
       name: Target Temperature (C)
       description: Optional. Overrides Boost Temperature slider when provided.
