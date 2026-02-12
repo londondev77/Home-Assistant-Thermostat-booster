@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from homeassistant.const import UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
-from homeassistant.util.unit_conversion import TemperatureConverter
 
 from .const import (
     CONF_THERMOSTAT,
@@ -148,24 +146,6 @@ async def async_finish_boost_for_entry(hass: HomeAssistant, entry_id: str) -> No
             {"entity_id": time_selector_entity_id, "value": 0},
             blocking=True,
         )
-
-    target_temp = 15.0
-    if hass.config.units.temperature_unit != UnitOfTemperature.CELSIUS:
-        target_temp = TemperatureConverter.convert(
-            15.0,
-            UnitOfTemperature.CELSIUS,
-            hass.config.units.temperature_unit,
-        )
-
-    await hass.services.async_call(
-        "climate",
-        "set_temperature",
-        {
-            "entity_id": data[CONF_THERMOSTAT],
-            "temperature": target_temp,
-        },
-        blocking=True,
-    )
 
     boost_active_entity_id = _get_entity_id(hass, entry_id, UNIQUE_ID_BOOST_ACTIVE)
     if boost_active_entity_id:
