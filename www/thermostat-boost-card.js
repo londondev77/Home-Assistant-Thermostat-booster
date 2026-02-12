@@ -228,7 +228,7 @@
         show_attribute: true,
         attribute: "current_temperature",
         show_state: false,
-        icon: "mdi:desk",
+        //icon: "mdi:home-thermometer",
         sub_button: {
           main: [
             {
@@ -361,13 +361,29 @@
         card_type: "pop-up",
         hash: navAnchor,
         name: resolved.label || "Thermostat",
-        icon: "mdi:desk",
+        icon: "mdi:home-thermometer",
         show_header: true,
         button_type: "name",
         sub_button: {
           main: [],
           bottom: [],
         },
+        styles: `
+          \${(() => {
+            const thermostatState = hass.states['${resolved.thermostatEntityId}'];
+            const thermostatIcon = thermostatState?.attributes?.icon || 'mdi:home-thermometer';
+            const headerIcon =
+              card.querySelector('.bubble-header .bubble-icon ha-icon') ||
+              card.querySelector('.bubble-header .bubble-icon');
+            if (!headerIcon) return '';
+            if ('icon' in headerIcon) {
+              headerIcon.icon = thermostatIcon;
+            } else {
+              headerIcon.setAttribute('icon', thermostatIcon);
+            }
+            return '';
+          })()}
+        `,
         slider_fill_orientation: "left",
         slider_value_position: "right",
       });
