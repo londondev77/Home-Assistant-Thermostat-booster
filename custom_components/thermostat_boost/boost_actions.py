@@ -13,9 +13,10 @@ from .const import (
     DATA_THERMOSTAT_NAME,
     DOMAIN,
     UNIQUE_ID_BOOST_ACTIVE,
+    UNIQUE_ID_SCHEDULE_OVERRIDE,
     UNIQUE_ID_TIME_SELECTOR,
 )
-from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.const import STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
 from .timer_manager import async_get_timer_registry
 
 _SNAPSHOT_STORAGE_VERSION = 1
@@ -273,4 +274,14 @@ async def async_finish_boost_for_entry(hass: HomeAssistant, entry_id: str) -> No
             blocking=True,
         )
 
-    await async_restore_scheduler_snapshot(hass, entry_id)
+    if not _is_switch_on(hass, entry_id, UNIQUE_ID_SCHEDULE_OVERRIDE):
+        await async_restore_scheduler_snapshot(hass, entry_id)
+
+
+@callback
+def _is_switch_on(hass: HomeAssistant, entry_id: str, unique_id_suffix: str) -> bool:
+    entity_id = _get_entity_id(hass, entry_id, unique_id_suffix)
+    if not entity_id:
+        return False
+    state = hass.states.get(entity_id)
+    return state is not None and state.state == STATE_ON

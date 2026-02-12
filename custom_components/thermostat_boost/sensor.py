@@ -10,6 +10,7 @@ import voluptuous as vol
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
+    STATE_ON,
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
     UnitOfTemperature,
@@ -35,6 +36,7 @@ from .const import (
     UNIQUE_ID_BOOST_ACTIVE,
     UNIQUE_ID_BOOST_FINISH,
     UNIQUE_ID_BOOST_TEMPERATURE,
+    UNIQUE_ID_SCHEDULE_OVERRIDE,
     UNIQUE_ID_TIME_SELECTOR,
 )
 from .entity_base import ThermostatBoostEntity
@@ -286,6 +288,7 @@ def _entry_id_from_unique_id(unique_id: str) -> str | None:
         UNIQUE_ID_BOOST_FINISH,
         UNIQUE_ID_BOOST_ACTIVE,
         UNIQUE_ID_BOOST_TEMPERATURE,
+        UNIQUE_ID_SCHEDULE_OVERRIDE,
         UNIQUE_ID_TIME_SELECTOR,
     ):
         token = f"_{suffix}"
@@ -337,6 +340,10 @@ async def async_start_boost_for_entry(
         data[CONF_THERMOSTAT],
         data[DATA_THERMOSTAT_NAME],
     )
+    boost_was_active = _is_switch_on(hass, entry_id, UNIQUE_ID_BOOST_ACTIVE)
+    schedule_override_active = _is_switch_on(
+        hass, entry_id, UNIQUE_ID_SCHEDULE_OVERRIDE
+    )
 
     if temperature_c is None:
         temperature_c = _get_number_value(hass, entry_id, UNIQUE_ID_BOOST_TEMPERATURE)
@@ -380,16 +387,17 @@ async def async_start_boost_for_entry(
             blocking=True,
         )
 
-    scheduler_switches = await async_create_scheduler_scene(
-        hass, entry_id, data[DATA_THERMOSTAT_NAME]
-    )
-    if scheduler_switches:
-        await hass.services.async_call(
-            "switch",
-            "turn_off",
-            {"entity_id": scheduler_switches},
-            blocking=True,
+    if not boost_was_active and not schedule_override_active:
+        scheduler_switches = await async_create_scheduler_scene(
+            hass, entry_id, data[DATA_THERMOSTAT_NAME]
         )
+        if scheduler_switches:
+            await hass.services.async_call(
+                "switch",
+                "turn_off",
+                {"entity_id": scheduler_switches},
+                blocking=True,
+            )
 
 
 def _parse_duration_value(value) -> timedelta:
@@ -421,3 +429,12 @@ def _parse_duration_value(value) -> timedelta:
     if duration.total_seconds() <= 0:
         raise HomeAssistantError("time cannot be 00:00:00.")
     return duration
+
+
+@callback
+def _is_switch_on(hass: HomeAssistant, entry_id: str, unique_id_suffix: str) -> bool:
+    entity_id = _get_entity_id(hass, entry_id, unique_id_suffix)
+    if not entity_id:
+        return False
+    state = hass.states.get(entity_id)
+    return state is not None and state.state == STATE_ON

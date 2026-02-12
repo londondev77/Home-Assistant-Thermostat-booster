@@ -1,12 +1,13 @@
 /* Thermostat Boost Lovelace Card */
 (() => {
-  const VERSION = "0.9.4";
+  const VERSION = "0.9.13";
   const DOMAIN = "thermostat_boost";
   const CARD_TYPE = "thermostat-boost-card";
   const BOOST_TEMP_SUFFIX = "_boost_temperature";
   const BOOST_TIME_SUFFIX = "_boost_time_selector";
   const BOOST_ACTIVE_SUFFIX = "_boost_active";
   const BOOST_FINISH_SUFFIX = "_boost_finish";
+  const SCHEDULE_OVERRIDE_SUFFIX = "_schedule_override";
 
   const computeLabel = (device) =>
     device?.name_by_user || device?.name || device?.id || "Thermostat Boost";
@@ -192,6 +193,11 @@
           entityList,
           deviceId,
           BOOST_FINISH_SUFFIX
+        ),
+        scheduleOverrideEntityId: findEntityId(
+          entityList,
+          deviceId,
+          SCHEDULE_OVERRIDE_SUFFIX
         ),
       };
     }
@@ -552,7 +558,111 @@
         });
       }
 
-      if (resolved.thermostatEntityId) {
+      if (resolved.scheduleOverrideEntityId && resolved.boostActiveEntityId) {
+        cards.push({
+          type: "conditional",
+          conditions: [
+            {
+              condition: "state",
+              entity: resolved.boostActiveEntityId,
+              state: "off",
+            },
+          ],
+          card: {
+            type: "entities",
+            show_header_toggle: false,
+            entities: [
+              {
+                entity: resolved.scheduleOverrideEntityId,
+                name: "Schedule Override",
+                icon: "mdi:grid-off",
+                tap_action: {
+                  action: "none",
+                },
+                hold_action: {
+                  action: "none",
+                },
+              },
+            ],
+          },
+        });
+
+        cards.push({
+          type: "conditional",
+          conditions: [
+            {
+              condition: "state",
+              entity: resolved.boostActiveEntityId,
+              state: "on",
+            },
+          ],
+          card: {
+            type: "markdown",
+            content: "Schedule override not available when boost is active.",
+          },
+        });
+      } else if (resolved.scheduleOverrideEntityId) {
+        cards.push({
+          type: "entities",
+          show_header_toggle: false,
+          entities: [
+            {
+              entity: resolved.scheduleOverrideEntityId,
+              name: "Schedule Override",
+              icon: "mdi:grid-off",
+              tap_action: {
+                action: "none",
+              },
+              hold_action: {
+                action: "none",
+              },
+            },
+          ],
+        });
+      }
+
+      if (resolved.thermostatEntityId && resolved.boostActiveEntityId) {
+        const thermostatName = resolved.label || resolved.thermostatEntityId;
+        cards.push({
+          type: "conditional",
+          conditions: [
+            {
+              condition: "state",
+              entity: resolved.boostActiveEntityId,
+              state: "off",
+            },
+          ],
+          card: {
+            type: "custom:scheduler-card",
+            tags: [thermostatName],
+            include: [resolved.thermostatEntityId],
+            display_options: {
+              primary_info: "{entity}",
+              secondary_info: ["days"],
+              icon: "entity",
+            },
+            discover_existing: false,
+            grid_options: null,
+            columns: 180,
+            rows: "auto",
+            title: false,
+          },
+        });
+        cards.push({
+          type: "conditional",
+          conditions: [
+            {
+              condition: "state",
+              entity: resolved.boostActiveEntityId,
+              state: "on",
+            },
+          ],
+          card: {
+            type: "markdown",
+            content: "Changing schedules is not availalable when boost is active",
+          },
+        });
+      } else if (resolved.thermostatEntityId) {
         const thermostatName = resolved.label || resolved.thermostatEntityId;
         cards.push({
           type: "custom:scheduler-card",
@@ -944,19 +1054,27 @@
     }
   }
 
-  customElements.define(CARD_TYPE, ThermostatBoostCard);
-  customElements.define(
-    "thermostat-boost-countdown",
-    ThermostatBoostCountdownCard
-  );
-  customElements.define("thermostat-boost-card-editor", ThermostatBoostCardEditor);
+  if (!customElements.get(CARD_TYPE)) {
+    customElements.define(CARD_TYPE, ThermostatBoostCard);
+  }
+  if (!customElements.get("thermostat-boost-countdown")) {
+    customElements.define(
+      "thermostat-boost-countdown",
+      ThermostatBoostCountdownCard
+    );
+  }
+  if (!customElements.get("thermostat-boost-card-editor")) {
+    customElements.define("thermostat-boost-card-editor", ThermostatBoostCardEditor);
+  }
 
   window.customCards = window.customCards || [];
-  window.customCards.push({
-    type: CARD_TYPE,
-    name: "Thermostat Boost",
-    description: "Thermostat card with boost controls",
-  });
+  if (!window.customCards.some((card) => card.type === CARD_TYPE)) {
+    window.customCards.push({
+      type: CARD_TYPE,
+      name: "Thermostat Boost",
+      description: "Thermostat card with boost controls",
+    });
+  }
 
   window.__thermostatBoostCardVersion = VERSION;
   if (window?.console?.info) {
