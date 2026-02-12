@@ -29,9 +29,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})
     if "finish_listener" not in hass.data[DOMAIN]:
+        def _handle_timer_finished_event(event) -> None:
+            hass.add_job(_handle_timer_finished(hass, event))
+
         hass.data[DOMAIN]["finish_listener"] = hass.bus.async_listen(
             EVENT_TIMER_FINISHED,
-            lambda event: hass.async_create_task(_handle_timer_finished(hass, event)),
+            _handle_timer_finished_event,
         )
     if "finish_callback" not in hass.data[DOMAIN]:
         hass.data[DOMAIN]["finish_callback"] = async_finish_boost_for_entry
