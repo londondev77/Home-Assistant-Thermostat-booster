@@ -5,6 +5,7 @@ from __future__ import annotations
 from homeassistant.const import UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.storage import Store
 from homeassistant.util.unit_conversion import TemperatureConverter
 
 from .const import (
@@ -15,7 +16,10 @@ from .const import (
     UNIQUE_ID_TIME_SELECTOR,
 )
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
-from homeassistant.util import slugify
+from .timer_manager import async_get_timer_registry
+
+_SNAPSHOT_STORAGE_VERSION = 1
+_SNAPSHOT_STORAGE_KEY = f"{DOMAIN}.scheduler_snapshot"
 
 
 def _matches_tag(tags, thermostat_name: str) -> bool:
@@ -51,29 +55,63 @@ def _get_scheduler_switches(hass: HomeAssistant, thermostat_name: str) -> list[s
     return matched
 
 
-def _scene_entity_id(entry_id: str) -> str:
-    return f"scene.{slugify(f'thermostat_boost_{entry_id}')}"
+async def _load_snapshot_store(
+    hass: HomeAssistant,
+) -> tuple[Store, dict[str, dict[str, str]]]:
+    store = Store(hass, _SNAPSHOT_STORAGE_VERSION, _SNAPSHOT_STORAGE_KEY)
+    data = await store.async_load() or {}
+    return store, data
 
 
 async def async_create_scheduler_scene(
     hass: HomeAssistant, entry_id: str, thermostat_name: str
 ) -> list[str]:
-    """Create a scene snapshot for scheduler switches and return the entity_ids."""
+    """Persist scheduler switch states and return the entity_ids."""
     scheduler_switches = _get_scheduler_switches(hass, thermostat_name)
     if not scheduler_switches:
         return []
 
-    await hass.services.async_call(
-        "scene",
-        "create",
-        {
-            "scene_id": slugify(f"thermostat_boost_{entry_id}"),
-            "snapshot_entities": scheduler_switches,
-        },
-        blocking=True,
-    )
-    return scheduler_switches
-from .timer_manager import async_get_timer_registry
+    snapshot: dict[str, str] = {}
+    for entity_id in scheduler_switches:
+        state = hass.states.get(entity_id)
+        if state is None or state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+            continue
+        snapshot[entity_id] = state.state
+
+    store, data = await _load_snapshot_store(hass)
+    data[entry_id] = snapshot
+    await store.async_save(data)
+    return list(snapshot.keys())
+
+
+async def async_restore_scheduler_snapshot(hass: HomeAssistant, entry_id: str) -> None:
+    """Restore scheduler switch states from persistent storage."""
+    store, data = await _load_snapshot_store(hass)
+    snapshot = data.pop(entry_id, None)
+    if snapshot is None:
+        return
+    await store.async_save(data)
+
+    if not snapshot:
+        return
+
+    to_turn_on = [entity_id for entity_id, state in snapshot.items() if state == "on"]
+    to_turn_off = [entity_id for entity_id, state in snapshot.items() if state != "on"]
+
+    if to_turn_on:
+        await hass.services.async_call(
+            "switch",
+            "turn_on",
+            {"entity_id": to_turn_on},
+            blocking=True,
+        )
+    if to_turn_off:
+        await hass.services.async_call(
+            "switch",
+            "turn_off",
+            {"entity_id": to_turn_off},
+            blocking=True,
+        )
 
 
 @callback
@@ -138,11 +176,4 @@ async def async_finish_boost_for_entry(hass: HomeAssistant, entry_id: str) -> No
             blocking=True,
         )
 
-    scene_entity_id = _scene_entity_id(entry_id)
-    if hass.states.get(scene_entity_id) is not None:
-        await hass.services.async_call(
-            "scene",
-            "turn_on",
-            {"entity_id": scene_entity_id},
-            blocking=True,
-        )
+    await async_restore_scheduler_snapshot(hass, entry_id)
