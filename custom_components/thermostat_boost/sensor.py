@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+import re
 from typing import Callable
 
 import voluptuous as vol
@@ -14,7 +15,8 @@ from homeassistant.const import (
     STATE_UNKNOWN,
     UnitOfTemperature,
 )
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -38,6 +40,17 @@ from .const import (
 )
 from .entity_base import ThermostatBoostEntity
 from .timer_manager import async_get_timer_registry
+
+_HMS_PATTERN = re.compile(r"^(?P<hours>\d+):(?P<minutes>[0-5]\d):(?P<seconds>[0-5]\d)$")
+_START_BOOST_SERVICE_SCHEMA = vol.Schema(
+    {
+        vol.Optional("device_id"): vol.Any(str, [str]),
+        vol.Optional("entity_id"): vol.Any(str, [str]),
+        vol.Optional("time"): str,
+        vol.Optional("temperature_c"): vol.Coerce(float),
+    },
+    extra=vol.ALLOW_EXTRA,
+)
 
 
 async def async_setup_entry(
@@ -66,16 +79,50 @@ async def async_setup_entry(
             "async_cancel_timer",
         )
         platform.async_register_entity_service(
-            SERVICE_START_BOOST,
-            {},
-            "async_start_boost",
-        )
-        platform.async_register_entity_service(
             SERVICE_FINISH_BOOST,
             {},
             "async_finish_boost",
         )
         hass.data[DOMAIN][services_key] = True
+
+    start_boost_service_key = "start_boost_service_registered"
+    if not hass.data[DOMAIN].get(start_boost_service_key):
+        async def _async_handle_start_boost(call: ServiceCall) -> None:
+            entry_ids: set[str] = set()
+            for device_id in _normalize_to_list(call.data.get("device_id")):
+                entry_id = _entry_id_from_device_id(hass, device_id)
+                if entry_id is None:
+                    raise HomeAssistantError(
+                        f"Unable to resolve thermostat_boost entry from device_id: {device_id}"
+                    )
+                entry_ids.add(entry_id)
+
+            for entity_id in _normalize_to_list(call.data.get("entity_id")):
+                entry_id = _entry_id_from_entity_id(hass, entity_id)
+                if entry_id is None:
+                    raise HomeAssistantError(
+                        f"Unable to resolve thermostat_boost entry from entity_id: {entity_id}"
+                    )
+                entry_ids.add(entry_id)
+
+            if not entry_ids:
+                raise HomeAssistantError("start_boost requires device_id.")
+
+            for entry_id in entry_ids:
+                await async_start_boost_for_entry(
+                    hass,
+                    entry_id,
+                    time=call.data.get("time"),
+                    temperature_c=call.data.get("temperature_c"),
+                )
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_START_BOOST,
+            _async_handle_start_boost,
+            schema=_START_BOOST_SERVICE_SCHEMA,
+        )
+        hass.data[DOMAIN][start_boost_service_key] = True
 
 
 class BoostFinishSensor(ThermostatBoostEntity, SensorEntity, RestoreEntity):
@@ -172,65 +219,15 @@ class BoostFinishSensor(ThermostatBoostEntity, SensorEntity, RestoreEntity):
             return
         await self._timer.async_cancel()
 
-    async def async_start_boost(self) -> None:
+    async def async_start_boost(
+        self,
+        time: str | None = None,
+        temperature_c: float | None = None,
+    ) -> None:
         """Start boost: set temperature, start timer, mark active."""
-        if self._timer is None:
-            return
-
-        temperature_c = _get_number_value(
-            self.hass, self._entry.entry_id, UNIQUE_ID_BOOST_TEMPERATURE
+        await async_start_boost_for_entry(
+            self.hass, self._entry.entry_id, time=time, temperature_c=temperature_c
         )
-        duration_hours = _get_number_value(
-            self.hass, self._entry.entry_id, UNIQUE_ID_TIME_SELECTOR
-        )
-
-        if temperature_c is None:
-            return
-        if duration_hours is None:
-            duration_hours = 0.0
-
-        target_temp = temperature_c
-        if self.hass.config.units.temperature_unit != UnitOfTemperature.CELSIUS:
-            target_temp = TemperatureConverter.convert(
-                temperature_c,
-                UnitOfTemperature.CELSIUS,
-                self.hass.config.units.temperature_unit,
-            )
-
-
-        await self.hass.services.async_call(
-            "climate",
-            "set_temperature",
-            {
-                "entity_id": self._data[CONF_THERMOSTAT],
-                "temperature": target_temp,
-            },
-            blocking=True,
-        )
-
-        await self._timer.async_start(timedelta(hours=float(duration_hours)))
-
-        boost_active_entity_id = _get_entity_id(
-            self.hass, self._entry.entry_id, UNIQUE_ID_BOOST_ACTIVE
-        )
-        if boost_active_entity_id:
-            await self.hass.services.async_call(
-                "switch",
-                "turn_on",
-                {"entity_id": boost_active_entity_id},
-                blocking=True,
-            )
-
-        scheduler_switches = await async_create_scheduler_scene(
-            self.hass, self._entry.entry_id, self._data[DATA_THERMOSTAT_NAME]
-        )
-        if scheduler_switches:
-            await self.hass.services.async_call(
-                "switch",
-                "turn_off",
-                {"entity_id": scheduler_switches},
-                blocking=True,
-            )
 
     async def async_finish_boost(self) -> None:
         """Finish boost: clear timer, reset temperature, mark inactive."""
@@ -266,3 +263,138 @@ def _get_number_value(
         return float(state.state)
     except (TypeError, ValueError):
         return None
+
+
+def _normalize_to_list(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value if item]
+    return [str(value)]
+
+
+def _entry_id_from_unique_id(unique_id: str) -> str | None:
+    for suffix in (
+        UNIQUE_ID_BOOST_FINISH,
+        UNIQUE_ID_BOOST_ACTIVE,
+        UNIQUE_ID_BOOST_TEMPERATURE,
+        UNIQUE_ID_TIME_SELECTOR,
+    ):
+        token = f"_{suffix}"
+        if unique_id.endswith(token):
+            return unique_id[: -len(token)]
+    return None
+
+
+@callback
+def _entry_id_from_entity_id(hass: HomeAssistant, entity_id: str) -> str | None:
+    entity_reg = er.async_get(hass)
+    reg_entry = entity_reg.async_get(entity_id)
+    if reg_entry is None:
+        return None
+    unique_id = reg_entry.unique_id or ""
+    return _entry_id_from_unique_id(unique_id)
+
+
+@callback
+def _entry_id_from_device_id(hass: HomeAssistant, device_id: str) -> str | None:
+    domain_data = hass.data.get(DOMAIN, {})
+    for entry_id in domain_data:
+        if entry_id in ("timer_services_registered", "start_boost_service_registered"):
+            continue
+        finish_entity_id = _get_entity_id(hass, entry_id, UNIQUE_ID_BOOST_FINISH)
+        if not finish_entity_id:
+            continue
+        entity_reg = er.async_get(hass)
+        reg_entry = entity_reg.async_get(finish_entity_id)
+        if reg_entry is not None and reg_entry.device_id == device_id:
+            return entry_id
+    return None
+
+
+async def async_start_boost_for_entry(
+    hass: HomeAssistant,
+    entry_id: str,
+    *,
+    time: str | None = None,
+    temperature_c: float | None = None,
+) -> None:
+    data = hass.data.get(DOMAIN, {}).get(entry_id)
+    if not data:
+        raise HomeAssistantError(f"No thermostat_boost entry found for {entry_id}")
+
+    registry = await async_get_timer_registry(hass)
+    timer = await registry.async_get_timer(
+        entry_id,
+        data[CONF_THERMOSTAT],
+        data[DATA_THERMOSTAT_NAME],
+    )
+
+    if temperature_c is None:
+        temperature_c = _get_number_value(hass, entry_id, UNIQUE_ID_BOOST_TEMPERATURE)
+    if temperature_c is None:
+        raise HomeAssistantError("Unable to determine boost temperature.")
+
+    if time is None:
+        duration_hours = _get_number_value(hass, entry_id, UNIQUE_ID_TIME_SELECTOR)
+        if duration_hours is None:
+            duration_hours = 0.0
+        duration = timedelta(hours=float(duration_hours))
+    else:
+        duration = _parse_hms_duration(time)
+
+    target_temp = temperature_c
+    if hass.config.units.temperature_unit != UnitOfTemperature.CELSIUS:
+        target_temp = TemperatureConverter.convert(
+            temperature_c,
+            UnitOfTemperature.CELSIUS,
+            hass.config.units.temperature_unit,
+        )
+
+    await hass.services.async_call(
+        "climate",
+        "set_temperature",
+        {
+            "entity_id": data[CONF_THERMOSTAT],
+            "temperature": target_temp,
+        },
+        blocking=True,
+    )
+
+    await timer.async_start(duration)
+
+    boost_active_entity_id = _get_entity_id(hass, entry_id, UNIQUE_ID_BOOST_ACTIVE)
+    if boost_active_entity_id:
+        await hass.services.async_call(
+            "switch",
+            "turn_on",
+            {"entity_id": boost_active_entity_id},
+            blocking=True,
+        )
+
+    scheduler_switches = await async_create_scheduler_scene(
+        hass, entry_id, data[DATA_THERMOSTAT_NAME]
+    )
+    if scheduler_switches:
+        await hass.services.async_call(
+            "switch",
+            "turn_off",
+            {"entity_id": scheduler_switches},
+            blocking=True,
+        )
+
+
+def _parse_hms_duration(value: str) -> timedelta:
+    """Parse duration in HH:MM:SS format and reject zero duration."""
+    match = _HMS_PATTERN.fullmatch(value.strip())
+    if match is None:
+        raise HomeAssistantError("time must be in HH:MM:SS format.")
+
+    duration = timedelta(
+        hours=int(match.group("hours")),
+        minutes=int(match.group("minutes")),
+        seconds=int(match.group("seconds")),
+    )
+    if duration.total_seconds() <= 0:
+        raise HomeAssistantError("time cannot be 00:00:00.")
+    return duration

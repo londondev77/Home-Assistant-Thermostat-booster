@@ -28,10 +28,31 @@ cancel_timer:
 start_boost:
   name: Start Boost
   description: Set thermostat temperature, start boost timer, and mark boost active.
-  target:
-    entity:
-      integration: thermostat_boost
-      domain: sensor
+  fields:
+    device_id:
+      name: Device
+      description: Thermostat Boost device to start.
+      required: true
+      selector:
+        device:
+          integration: thermostat_boost
+    time:
+      name: Time (HH:MM:SS)
+      description: Optional. Overrides Boost Time Selector when provided. Cannot be 00:00:00.
+      example: "00:30:00"
+      selector:
+        duration:
+            allow_negative: false
+    temperature_c:
+      name: Target Temperature (C)
+      description: Optional. Overrides Boost Temperature slider when provided.
+      example: 19.5
+      selector:
+        number:
+          min: 5
+          max: 30
+          step: 0.5
+          unit_of_measurement: C
 
 finish_boost:
   name: Finish Boost
