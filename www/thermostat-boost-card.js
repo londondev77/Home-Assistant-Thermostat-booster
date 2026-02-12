@@ -736,15 +736,24 @@
 
       const style = document.createElement("style");
       style.textContent = `
+        :host {
+          display: block;
+          height: 100%;
+        }
         ha-card {
           padding: 0 8px;
+          height: 100%;
+          display: flex;
+          align-items: center;
         }
         .row {
           display: flex;
           align-items: center;
           justify-content: space-between;
           gap: 12px;
-          padding: 10px 4px;
+          padding: 0 12px;
+          width: 100%;
+          min-height: var(--tile-height, 56px);
         }
         .label {
           display: flex;
