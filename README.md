@@ -30,6 +30,12 @@ It is designed for homes that already use schedules and need a reliable, tempora
   - reset time selector to `0`
   - restore Scheduler switches to their pre-boost on/off states
   - or restore the original thermostat target temperature when Schedule Override is active or no schedules are matched
+- Dynamic boost temperature slider bounds:
+  - reads thermostat `min_temp` and `max_temp` attributes
+  - if `min_temp` is unavailable, defaults to `0`
+  - if `max_temp` is unavailable, defaults to `25`
+  - if both values are `0`, uses `0-25`
+  - if only one value is `0`, that `0` is kept as-is
 - Timer persistence across reboot:
   - timer end timestamps are stored
   - active timers are reconstructed after restart
@@ -188,6 +194,7 @@ If you use it, add the JS resource in Dashboard resources and configure the card
 - When Schedule Override is active, or no matching Scheduler switches are found for the thermostat, boost stores and restores the original thermostat target temperature.
 - Otherwise, boost end restores Scheduler switch state and retriggers schedule switches that were previously on.
 - For best results, use this integration with Scheduler rules that define your normal temperature behavior.
+- If the thermostat's `min_temp`/`max_temp` values change, reload the Thermostat Boost integration entry (or restart Home Assistant) for the Boost Temperature slider range to update.
 
 ## Development Status
 

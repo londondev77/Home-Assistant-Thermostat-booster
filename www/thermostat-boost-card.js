@@ -461,8 +461,6 @@
                 name: "Boost Temperature",
                 full_row: true,
                 show_icon: true,
-                max: 25,
-                min: 5,
                 step: 0.5,
                 toggle: false,
                 hide_state: false,

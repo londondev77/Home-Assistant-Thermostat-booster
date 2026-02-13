@@ -44,6 +44,38 @@ def _default_boost_temperature(hass: HomeAssistant, entity_id: str) -> float | N
     return None
 
 
+def _dynamic_boost_temperature_bounds(
+    hass: HomeAssistant, entity_id: str
+) -> tuple[float, float]:
+    """Derive slider bounds from thermostat attributes with safe fallbacks."""
+    state = hass.states.get(entity_id)
+    attributes = state.attributes if state is not None else {}
+
+    def _read_bound(key: str) -> float | None:
+        value = attributes.get(key)
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    min_temp = _read_bound("min_temp")
+    max_temp = _read_bound("max_temp")
+
+    # Attribute unavailable fallbacks.
+    if min_temp is None:
+        min_temp = 0.0
+    if max_temp is None:
+        max_temp = 25.0
+
+    # Some thermostats report both bounds as 0 when limits are not meaningful.
+    if min_temp == 0.0 and max_temp == 0.0:
+        max_temp = 25.0
+
+    return min_temp, max_temp
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -65,7 +97,7 @@ class BoostTemperatureNumber(ThermostatBoostEntity, NumberEntity, RestoreEntity)
 
     _attr_icon = "mdi:thermometer-plus"
     _attr_mode = NumberMode.SLIDER
-    _attr_native_min_value = 5.0
+    _attr_native_min_value = 0.0
     _attr_native_max_value = 25.0
     _attr_native_step = 0.5
     _attr_native_unit_of_measurement = "C"
@@ -84,6 +116,12 @@ class BoostTemperatureNumber(ThermostatBoostEntity, NumberEntity, RestoreEntity)
             entity_name="Boost Temperature",
             unique_id_suffix=UNIQUE_ID_BOOST_TEMPERATURE,
         )
+        min_temp, max_temp = _dynamic_boost_temperature_bounds(
+            hass, thermostat_entity_id
+        )
+        self._attr_native_min_value = min_temp
+        self._attr_native_max_value = max_temp
+
         self._native_value: float | None = _default_boost_temperature(
             hass, thermostat_entity_id
         )
