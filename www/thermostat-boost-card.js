@@ -646,6 +646,7 @@
             columns: 180,
             rows: "auto",
             title: false,
+			default_editor: "scheme",
           },
         });
         cards.push({
