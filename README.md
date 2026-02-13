@@ -103,6 +103,19 @@ Recommended:
 
 If no matching Scheduler switches are found, boost temperature is still set and timer still runs, but schedule pause/restore behavior will not apply.
 
+## Schedule Override (Long-Term Changes)
+
+For longer-term changes (for example holidays), use Scheduler/Scheduler Card to create or enable an override schedule for the thermostat.
+
+- Boost is intentionally short-lived and timer-based, so it will auto-finish.
+- A scheduler override can stay in place across days/weeks and does not have to auto-revert on a boost timer.
+- When you are ready to return to normal operation, disable/remove the override schedule in Scheduler.
+
+This gives you two control patterns:
+
+1. `start_boost` for temporary heat increases that should end automatically.
+2. Scheduler override rules for extended periods where you want manual control of when it ends.
+
 ## Entities Created
 
 For each thermostat entry:
@@ -149,20 +162,6 @@ service: thermostat_boost.finish_boost
 target:
   entity_id: sensor.lounge_boost_finish
 ```
-
-### `thermostat_boost.start_timer`
-
-Starts only the timer on a boost finish sensor.
-
-Fields:
-
-- `hours` (optional)
-- `minutes` (optional)
-- if omitted, uses Boost Time Selector value
-
-### `thermostat_boost.cancel_timer`
-
-Cancels only the timer on a boost finish sensor.
 
 ## Typical Boost Flow
 

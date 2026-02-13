@@ -29,8 +29,6 @@ from .const import (
     CONF_THERMOSTAT,
     DATA_THERMOSTAT_NAME,
     DOMAIN,
-    SERVICE_TIMER_CANCEL,
-    SERVICE_TIMER_START,
     SERVICE_START_BOOST,
     SERVICE_FINISH_BOOST,
     UNIQUE_ID_BOOST_ACTIVE,
@@ -73,21 +71,8 @@ async def async_setup_entry(
     async_add_entities([BoostFinishSensor(hass, entry, data)])
 
     platform = entity_platform.async_get_current_platform()
-    services_key = "timer_services_registered"
+    services_key = "finish_boost_service_registered"
     if not hass.data[DOMAIN].get(services_key):
-        platform.async_register_entity_service(
-            SERVICE_TIMER_START,
-            {
-                vol.Optional("hours"): vol.Coerce(float),
-                vol.Optional("minutes"): vol.Coerce(float),
-            },
-            "async_start_timer",
-        )
-        platform.async_register_entity_service(
-            SERVICE_TIMER_CANCEL,
-            {},
-            "async_cancel_timer",
-        )
         platform.async_register_entity_service(
             SERVICE_FINISH_BOOST,
             {},
@@ -203,32 +188,6 @@ class BoostFinishSensor(ThermostatBoostEntity, SensorEntity, RestoreEntity):
         """Return the current value."""
         return self._native_value
 
-    async def async_start_timer(
-        self,
-        hours: float | None = None,
-        minutes: float | None = None,
-    ) -> None:
-        """Start the timer using hours/minutes or the time selector value."""
-        if self._timer is None:
-            return
-
-        if hours is None and minutes is None:
-            hours = _get_time_selector_value(self.hass, self._entry.entry_id)
-
-        if hours is None and minutes is None:
-            hours = 0.0
-
-        if hours is None and minutes is not None:
-            await self._timer.async_start(timedelta(minutes=float(minutes)))
-        else:
-            await self._timer.async_start(timedelta(hours=float(hours)))
-
-    async def async_cancel_timer(self) -> None:
-        """Cancel the timer."""
-        if self._timer is None:
-            return
-        await self._timer.async_cancel()
-
     async def async_start_boost(
         self,
         time: dict | str | None = None,
@@ -242,11 +201,6 @@ class BoostFinishSensor(ThermostatBoostEntity, SensorEntity, RestoreEntity):
     async def async_finish_boost(self) -> None:
         """Finish boost: clear timer, reset temperature, mark inactive."""
         await async_finish_boost_for_entry(self.hass, self._entry.entry_id)
-
-
-@callback
-def _get_time_selector_value(hass: HomeAssistant, entry_id: str) -> float | None:
-    return _get_number_value(hass, entry_id, UNIQUE_ID_TIME_SELECTOR)
 
 
 @callback

@@ -7,8 +7,6 @@ CONF_THERMOSTAT = "thermostat"
 DATA_THERMOSTAT_NAME = "thermostat_name"
 
 EVENT_TIMER_FINISHED = "thermostat_boost_timer_finished"
-SERVICE_TIMER_START = "start_timer"
-SERVICE_TIMER_CANCEL = "cancel_timer"
 SERVICE_START_BOOST = "start_boost"
 SERVICE_FINISH_BOOST = "finish_boost"
 

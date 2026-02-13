@@ -1,30 +1,3 @@
-start_timer:
-  name: Start Timer
-  description: Start the boost timer for this thermostat.
-  target:
-    entity:
-      integration: thermostat_boost
-      domain: sensor
-  fields:
-    minutes:
-      name: Minutes
-      description: Duration in minutes. If omitted, uses the Boost Time Selector value.
-      example: 30
-      selector:
-        number:
-          min: 0
-          max: 60
-          step: 1
-          unit_of_measurement: min
-
-cancel_timer:
-  name: Cancel Timer
-  description: Cancel the boost timer for this thermostat.
-  target:
-    entity:
-      integration: thermostat_boost
-      domain: sensor
-
 start_boost:
   name: Start Boost
   description: Set thermostat temperature, start boost timer, and mark boost active.
