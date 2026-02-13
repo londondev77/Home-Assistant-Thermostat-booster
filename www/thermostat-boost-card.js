@@ -214,6 +214,79 @@
         .replace(/[^a-z0-9]+/g, "_")
         .replace(/^_+|_+$/g, "");
       const navAnchor = navSlug ? `#${navSlug}_detail` : "#detail";
+      const hasScheduleOverrideButton = Boolean(resolved.scheduleOverrideEntityId);
+      const countdownSubButtonClass = hasScheduleOverrideButton
+        ? ".bubble-sub-button-2"
+        : ".bubble-sub-button-1";
+      const heatingSubButtonClass = hasScheduleOverrideButton
+        ? ".bubble-sub-button-4"
+        : ".bubble-sub-button-3";
+      const headerSubButtons = [];
+      if (hasScheduleOverrideButton) {
+        headerSubButtons.push({
+          entity: resolved.scheduleOverrideEntityId,
+          icon: "mdi:grid-off",
+          show_background: true,
+          state_background: false,
+          tap_action: {
+            action: "navigate",
+            navigation_path: navAnchor,
+          },
+          visibility: [
+            {
+              condition: "state",
+              entity: resolved.scheduleOverrideEntityId,
+              state: "on",
+            },
+          ],
+          fill_width: false,
+        });
+      }
+      headerSubButtons.push(
+        {
+          entity: resolved.boostFinishEntityId,
+          name: "-",
+          show_name: true,
+          show_state: false,
+          icon: "mdi:rocket-launch",
+          show_background: true,
+          tap_action: {
+            action: "navigate",
+            navigation_path: navAnchor,
+          },
+          visibility: [
+            {
+              condition: "state",
+              entity: resolved.boostActiveEntityId,
+              state: "on",
+            },
+          ],
+          fill_width: false,
+        },
+        {
+          entity: resolved.thermostatEntityId,
+          show_attribute: true,
+          attribute: "temperature",
+          show_icon: true,
+          state_background: false,
+          icon: "mdi:bullseye-arrow",
+          tap_action: {
+            action: "navigate",
+            navigation_path: navAnchor,
+          },
+          fill_width: false,
+          width: 79,
+        },
+        {
+          icon: "mdi:fire",
+          tap_action: {
+            action: "navigate",
+            url_path: navAnchor,
+            navigation_path: navAnchor,
+          },
+          state_background: true,
+        }
+      );
 
       this._bubbleHeaderConfig = {
         type: "custom:bubble-card",
@@ -236,57 +309,13 @@
         show_state: false,
         //icon: "mdi:home-thermometer",
         sub_button: {
-          main: [
-            {
-              entity: resolved.boostFinishEntityId,
-              name: "-",
-              show_name: true,
-              show_state: false,
-              icon: "mdi:rocket-launch",
-              show_background: true,
-              tap_action: {
-                action: "navigate",
-                navigation_path: navAnchor,
-              },
-              visibility: [
-                {
-                  condition: "state",
-                  entity: resolved.boostActiveEntityId,
-                  state: "on",
-                },
-              ],
-              fill_width: false,
-            },
-            {
-              entity: resolved.thermostatEntityId,
-              show_attribute: true,
-              attribute: "temperature",
-              show_icon: true,
-              state_background: false,
-              icon: "mdi:bullseye-arrow",
-              tap_action: {
-                action: "navigate",
-                navigation_path: navAnchor,
-              },
-              fill_width: false,
-              width: 79,
-            },
-            {
-              icon: "mdi:fire",
-              tap_action: {
-                action: "navigate",
-                url_path: navAnchor,
-                navigation_path: navAnchor,
-              },
-              state_background: true,
-            },
-          ],
+          main: headerSubButtons,
           bottom: [],
         },
         styles: `
           \${(() => {
             const container = card.querySelector(
-              '.bubble-sub-button-1 .bubble-sub-button-name-container'
+              '${countdownSubButtonClass} .bubble-sub-button-name-container'
             );
             if (!container) return '';
 
@@ -348,11 +377,11 @@
             update();
             return '';
           })()}
-          .bubble-sub-button-1 .bubble-name {
+          ${countdownSubButtonClass} .bubble-name {
             font-size: 11px;
             line-height: 1.1;
           }
-          .bubble-sub-button-3 {
+          ${heatingSubButtonClass} {
             background-color: \${hass.states['${resolved.thermostatEntityId}'].attributes.hvac_action === 'heating'
               ? 'var(--state-climate-heat-color)'
               : 'var(--card-background-color)'} !important;
@@ -490,6 +519,13 @@
                 type: "tile",
                 entity: resolved.boostFinishEntityId,
                 tap_action: {
+                  action: "call-service",
+                  service: `${DOMAIN}.finish_boost`,
+                  service_data: {
+                    entity_id: resolved.boostFinishEntityId,
+                  },
+                },
+                icon_tap_action: {
                   action: "call-service",
                   service: `${DOMAIN}.finish_boost`,
                   service_data: {
@@ -739,7 +775,10 @@
 
     _mountBubbleInlineCountdown() {
       if (!this._resolved?.boostFinishEntityId || !this._hass) return false;
-      const subButton = this._queryDeep(".bubble-sub-button-1");
+      const countdownButtonClass = this._resolved?.scheduleOverrideEntityId
+        ? ".bubble-sub-button-2"
+        : ".bubble-sub-button-1";
+      const subButton = this._queryDeep(countdownButtonClass);
       if (!subButton) return false;
 
       return this._updateBubbleCountdownText();
