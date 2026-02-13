@@ -24,7 +24,12 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util.unit_conversion import TemperatureConverter
 from homeassistant.util import dt as dt_util
 
-from .boost_actions import async_create_scheduler_scene, async_finish_boost_for_entry
+from .boost_actions import (
+    async_clear_target_temperature_snapshot,
+    async_create_scheduler_scene,
+    async_finish_boost_for_entry,
+    async_store_target_temperature_snapshot,
+)
 from .const import (
     CONF_THERMOSTAT,
     DATA_THERMOSTAT_NAME,
@@ -298,6 +303,19 @@ async def async_start_boost_for_entry(
     schedule_override_active = _is_switch_on(
         hass, entry_id, UNIQUE_ID_SCHEDULE_OVERRIDE
     )
+    if not boost_was_active:
+        scheduler_switches = _get_scheduler_switches_for_thermostat(
+            hass, data[DATA_THERMOSTAT_NAME]
+        )
+        no_schedules_defined = not scheduler_switches
+        if schedule_override_active or no_schedules_defined:
+            await async_store_target_temperature_snapshot(
+                hass,
+                entry_id,
+                data[CONF_THERMOSTAT],
+            )
+        else:
+            await async_clear_target_temperature_snapshot(hass, entry_id)
 
     if temperature_c is None:
         temperature_c = _get_number_value(hass, entry_id, UNIQUE_ID_BOOST_TEMPERATURE)
@@ -392,3 +410,35 @@ def _is_switch_on(hass: HomeAssistant, entry_id: str, unique_id_suffix: str) -> 
         return False
     state = hass.states.get(entity_id)
     return state is not None and state.state == STATE_ON
+
+
+@callback
+def _get_scheduler_switches_for_thermostat(
+    hass: HomeAssistant, thermostat_name: str
+) -> list[str]:
+    """Return scheduler switches that match thermostat tags."""
+    entity_reg = er.async_get(hass)
+    matched: list[str] = []
+    thermostat_name_lower = thermostat_name.lower()
+
+    for entry in entity_reg.entities.values():
+        if entry.domain != "switch" or (entry.platform or "").lower() != "scheduler":
+            continue
+
+        state = hass.states.get(entry.entity_id)
+        if state is None or state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+            continue
+
+        tags = state.attributes.get("tags")
+        if isinstance(tags, str):
+            if thermostat_name_lower in tags.lower():
+                matched.append(entry.entity_id)
+            continue
+
+        if isinstance(tags, list):
+            for tag in tags:
+                if isinstance(tag, str) and thermostat_name_lower in tag.lower():
+                    matched.append(entry.entity_id)
+                    break
+
+    return matched

@@ -29,6 +29,7 @@ It is designed for homes that already use schedules and need a reliable, tempora
   - mark boost inactive
   - reset time selector to `0`
   - restore Scheduler switches to their pre-boost on/off states
+  - or restore the original thermostat target temperature when Schedule Override is active or no schedules are matched
 - Timer persistence across reboot:
   - timer end timestamps are stored
   - active timers are reconstructed after restart
@@ -184,7 +185,8 @@ If you use it, add the JS resource in Dashboard resources and configure the card
 
 ## Known Behavior
 
-- Boost end logic is schedule-centric: it restores Scheduler switch state rather than storing/restoring a direct prior thermostat setpoint value.
+- When Schedule Override is active, or no matching Scheduler switches are found for the thermostat, boost stores and restores the original thermostat target temperature.
+- Otherwise, boost end restores Scheduler switch state and retriggers schedule switches that were previously on.
 - For best results, use this integration with Scheduler rules that define your normal temperature behavior.
 
 ## Development Status
