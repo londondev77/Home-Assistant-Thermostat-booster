@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Callable
 
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.core import HomeAssistant, callback
@@ -26,8 +27,10 @@ _SNAPSHOT_STORAGE_VERSION = 1
 _SNAPSHOT_STORAGE_KEY = f"{DOMAIN}.scheduler_snapshot"
 _SNAPSHOT_RESTORE_RETRY_DELAY = 15
 _SNAPSHOT_RESTORE_PENDING_KEY = "snapshot_restore_pending"
+_SNAPSHOT_RESTORE_UNSUB_KEY = "snapshot_restore_unsub"
 _SNAPSHOT_RETRIGGER_DELAY = 10
 _SNAPSHOT_RETRIGGER_PENDING_KEY = "snapshot_retrigger_pending"
+_SNAPSHOT_RETRIGGER_UNSUB_KEY = "snapshot_retrigger_unsub"
 _TEMP_SNAPSHOT_STORAGE_VERSION = 1
 _TEMP_SNAPSHOT_STORAGE_KEY = f"{DOMAIN}.temperature_snapshot"
 _LOGGER = logging.getLogger(__name__)
@@ -59,11 +62,64 @@ def _get_snapshot_retrigger_pending(hass: HomeAssistant) -> set[str]:
     return domain_data.setdefault(_SNAPSHOT_RETRIGGER_PENDING_KEY, set())
 
 
+def _get_snapshot_restore_unsub(
+    hass: HomeAssistant,
+) -> dict[str, Callable[[], None]]:
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    return domain_data.setdefault(_SNAPSHOT_RESTORE_UNSUB_KEY, {})
+
+
+def _get_snapshot_retrigger_unsub(
+    hass: HomeAssistant,
+) -> dict[str, Callable[[], None]]:
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    return domain_data.setdefault(_SNAPSHOT_RETRIGGER_UNSUB_KEY, {})
+
+
+@callback
+def async_cancel_pending_scheduler_callbacks(hass: HomeAssistant, entry_id: str) -> None:
+    """Cancel pending delayed scheduler callbacks for an entry."""
+    restore_unsubs = _get_snapshot_restore_unsub(hass)
+    retrigger_unsubs = _get_snapshot_retrigger_unsub(hass)
+
+    restore_cancelled = False
+    if (unsub := restore_unsubs.pop(entry_id, None)) is not None:
+        unsub()
+        restore_cancelled = True
+
+    retrigger_cancelled = False
+    if (unsub := retrigger_unsubs.pop(entry_id, None)) is not None:
+        unsub()
+        retrigger_cancelled = True
+
+    _get_snapshot_restore_pending(hass).pop(entry_id, None)
+    _get_snapshot_retrigger_pending(hass).discard(entry_id)
+
+    if restore_cancelled or retrigger_cancelled:
+        _LOGGER.debug(
+            "Cancelled pending scheduler callbacks for %s (restore=%s, retrigger=%s)",
+            entry_id,
+            restore_cancelled,
+            retrigger_cancelled,
+        )
+
+
 def _schedule_snapshot_restore_retry(
     hass: HomeAssistant, entry_id: str, *, allow_retrigger: bool
 ) -> None:
     pending = _get_snapshot_restore_pending(hass)
     pending[entry_id] = bool(pending.get(entry_id)) or allow_retrigger
+
+    restore_unsubs = _get_snapshot_restore_unsub(hass)
+    if entry_id in restore_unsubs:
+        _LOGGER.debug(
+            "Scheduler snapshot restore retry already pending for %s "
+            "(allow_retrigger=%s)",
+            entry_id,
+            pending[entry_id],
+        )
+        return
+
     _LOGGER.debug(
         "Scheduling scheduler snapshot restore retry for %s (allow_retrigger=%s)",
         entry_id,
@@ -72,6 +128,7 @@ def _schedule_snapshot_restore_retry(
 
     @callback
     def _retry(_now) -> None:
+        restore_unsubs.pop(entry_id, None)
         allow = bool(pending.pop(entry_id, False))
         hass.add_job(
             async_restore_scheduler_snapshot(
@@ -81,14 +138,17 @@ def _schedule_snapshot_restore_retry(
             )
         )
 
-    async_call_later(hass, _SNAPSHOT_RESTORE_RETRY_DELAY, _retry)
+    restore_unsubs[entry_id] = async_call_later(
+        hass, _SNAPSHOT_RESTORE_RETRY_DELAY, _retry
+    )
 
 
 def _schedule_scheduler_retrigger(
     hass: HomeAssistant, entry_id: str, to_turn_on: list[str]
 ) -> None:
     pending = _get_snapshot_retrigger_pending(hass)
-    if entry_id in pending:
+    retrigger_unsubs = _get_snapshot_retrigger_unsub(hass)
+    if entry_id in pending or entry_id in retrigger_unsubs:
         return
 
     target_entities = sorted({entity_id for entity_id in to_turn_on if entity_id})
@@ -99,11 +159,14 @@ def _schedule_scheduler_retrigger(
     @callback
     def _retry(_now) -> None:
         pending.discard(entry_id)
+        retrigger_unsubs.pop(entry_id, None)
         hass.add_job(
             _async_retrigger_scheduler_switches(hass, entry_id, target_entities)
         )
 
-    async_call_later(hass, _SNAPSHOT_RETRIGGER_DELAY, _retry)
+    retrigger_unsubs[entry_id] = async_call_later(
+        hass, _SNAPSHOT_RETRIGGER_DELAY, _retry
+    )
 
 
 async def _async_retrigger_scheduler_switches(
@@ -268,8 +331,7 @@ async def async_clear_scheduler_snapshot(hass: HomeAssistant, entry_id: str) -> 
     if entry_id in data:
         data.pop(entry_id, None)
         await store.async_save(data)
-    _get_snapshot_restore_pending(hass).pop(entry_id, None)
-    _get_snapshot_retrigger_pending(hass).discard(entry_id)
+    async_cancel_pending_scheduler_callbacks(hass, entry_id)
 
 
 @callback

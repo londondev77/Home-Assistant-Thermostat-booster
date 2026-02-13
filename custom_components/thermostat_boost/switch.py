@@ -10,7 +10,11 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .boost_actions import async_create_scheduler_scene, async_restore_scheduler_snapshot
+from .boost_actions import (
+    async_cancel_pending_scheduler_callbacks,
+    async_create_scheduler_scene,
+    async_restore_scheduler_snapshot,
+)
 from .const import (
     DATA_THERMOSTAT_NAME,
     DOMAIN,
@@ -106,6 +110,7 @@ class ScheduleOverrideSwitch(ThermostatBoostEntity, SwitchEntity, RestoreEntity)
         """Snapshot current schedules and suspend them."""
         if self._is_on:
             return
+        async_cancel_pending_scheduler_callbacks(self.hass, self._entry.entry_id)
 
         if not _is_switch_on(self.hass, self._entry.entry_id, UNIQUE_ID_BOOST_ACTIVE):
             scheduler_switches = await async_create_scheduler_scene(
@@ -129,6 +134,7 @@ class ScheduleOverrideSwitch(ThermostatBoostEntity, SwitchEntity, RestoreEntity)
         if not self._is_on:
             return
 
+        async_cancel_pending_scheduler_callbacks(self.hass, self._entry.entry_id)
         self._is_on = False
         self.async_write_ha_state()
 
