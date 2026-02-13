@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_call_later
@@ -28,6 +30,7 @@ _SNAPSHOT_RETRIGGER_DELAY = 10
 _SNAPSHOT_RETRIGGER_PENDING_KEY = "snapshot_retrigger_pending"
 _TEMP_SNAPSHOT_STORAGE_VERSION = 1
 _TEMP_SNAPSHOT_STORAGE_KEY = f"{DOMAIN}.temperature_snapshot"
+_LOGGER = logging.getLogger(__name__)
 
 
 async def _load_snapshot_store(
@@ -61,6 +64,11 @@ def _schedule_snapshot_restore_retry(
 ) -> None:
     pending = _get_snapshot_restore_pending(hass)
     pending[entry_id] = bool(pending.get(entry_id)) or allow_retrigger
+    _LOGGER.debug(
+        "Scheduling scheduler snapshot restore retry for %s (allow_retrigger=%s)",
+        entry_id,
+        pending[entry_id],
+    )
 
     @callback
     def _retry(_now) -> None:
@@ -131,8 +139,13 @@ async def _async_retrigger_scheduler_switches(
             {"entity_id": available_entities},
             blocking=True,
         )
-    except HomeAssistantError:
-        pass
+    except HomeAssistantError as err:
+        _LOGGER.warning(
+            "Scheduler retrigger failed for %s on %s: %s",
+            entry_id,
+            available_entities,
+            err,
+        )
 
 
 async def async_create_scheduler_scene(
@@ -163,9 +176,17 @@ async def async_restore_scheduler_snapshot(
     # Do not restore schedules while boost or override is active.
     if _is_switch_on(hass, entry_id, UNIQUE_ID_BOOST_ACTIVE):
         _get_snapshot_restore_pending(hass).pop(entry_id, None)
+        _LOGGER.debug(
+            "Skipping scheduler snapshot restore for %s because boost is active",
+            entry_id,
+        )
         return
     if _is_switch_on(hass, entry_id, UNIQUE_ID_SCHEDULE_OVERRIDE):
         _get_snapshot_restore_pending(hass).pop(entry_id, None)
+        _LOGGER.debug(
+            "Skipping scheduler snapshot restore for %s because schedule override is active",
+            entry_id,
+        )
         return
 
     store, data = await _load_snapshot_store(hass)
@@ -189,6 +210,11 @@ async def async_restore_scheduler_snapshot(
         )
     ]
     if missing_entities:
+        _LOGGER.debug(
+            "Deferring scheduler snapshot restore for %s; unavailable entities: %s",
+            entry_id,
+            missing_entities,
+        )
         _schedule_snapshot_restore_retry(
             hass,
             entry_id,
@@ -214,7 +240,14 @@ async def async_restore_scheduler_snapshot(
                 {"entity_id": to_turn_off},
                 blocking=True,
             )
-    except HomeAssistantError:
+    except HomeAssistantError as err:
+        _LOGGER.warning(
+            "Scheduler snapshot restore failed for %s (on=%s, off=%s): %s",
+            entry_id,
+            to_turn_on,
+            to_turn_off,
+            err,
+        )
         _schedule_snapshot_restore_retry(
             hass,
             entry_id,
@@ -259,11 +292,22 @@ async def async_store_target_temperature_snapshot(
     """Persist current thermostat target temperature for later restore."""
     temperature = _get_current_target_temperature(hass, thermostat_entity_id)
     if temperature is None:
+        _LOGGER.debug(
+            "No target temperature available to snapshot for %s (%s)",
+            entry_id,
+            thermostat_entity_id,
+        )
         return False
 
     store, data = await _load_temperature_snapshot_store(hass)
     data[entry_id] = temperature
     await store.async_save(data)
+    _LOGGER.debug(
+        "Stored target temperature snapshot for %s (%s): %s",
+        entry_id,
+        thermostat_entity_id,
+        temperature,
+    )
     return True
 
 
@@ -273,11 +317,21 @@ async def async_restore_target_temperature_snapshot(
     """Restore thermostat target temperature from persistent storage."""
     store, data = await _load_temperature_snapshot_store(hass)
     if entry_id not in data:
+        _LOGGER.debug(
+            "No target temperature snapshot found for %s",
+            entry_id,
+        )
         return False
 
     try:
         temperature = float(data[entry_id])
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as err:
+        _LOGGER.warning(
+            "Invalid target temperature snapshot for %s (%s): %s",
+            entry_id,
+            data.get(entry_id),
+            err,
+        )
         data.pop(entry_id, None)
         await store.async_save(data)
         return False
@@ -292,11 +346,23 @@ async def async_restore_target_temperature_snapshot(
             },
             blocking=True,
         )
-    except HomeAssistantError:
+    except HomeAssistantError as err:
+        _LOGGER.warning(
+            "Failed to restore target temperature for %s (%s): %s",
+            entry_id,
+            thermostat_entity_id,
+            err,
+        )
         return False
 
     data.pop(entry_id, None)
     await store.async_save(data)
+    _LOGGER.debug(
+        "Restored target temperature snapshot for %s (%s): %s",
+        entry_id,
+        thermostat_entity_id,
+        temperature,
+    )
     return True
 
 
@@ -308,6 +374,7 @@ async def async_clear_target_temperature_snapshot(
     if entry_id in data:
         data.pop(entry_id, None)
         await store.async_save(data)
+        _LOGGER.debug("Cleared target temperature snapshot for %s", entry_id)
 
 
 @callback
@@ -360,11 +427,19 @@ async def async_finish_boost_for_entry(hass: HomeAssistant, entry_id: str) -> No
     no_schedules_defined = not scheduler_switches
 
     if schedule_override_active or no_schedules_defined:
-        await async_restore_target_temperature_snapshot(
+        restored = await async_restore_target_temperature_snapshot(
             hass,
             entry_id,
             data[CONF_THERMOSTAT],
         )
+        if not restored:
+            _LOGGER.debug(
+                "No target temperature snapshot restored for %s during finish_boost "
+                "(override_active=%s, no_schedules_defined=%s)",
+                entry_id,
+                schedule_override_active,
+                no_schedules_defined,
+            )
         return
 
     await async_clear_target_temperature_snapshot(hass, entry_id)
