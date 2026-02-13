@@ -18,15 +18,17 @@ Done but needs testing
 17.	Get the countdown working properly on the summary card
 18.	Reinstate 0 to 24 hours step 0.5
 19.	Add units to sliders
+22.	Check services – what has been created? Can we integrate timer services overall or at least hide them?
 
 To do
 Test:
 1a - does the scene restore when the boost continues past a reboot
 1b - get the end boost to trigger correctly if it expires on reboot.  Ensure scene gets triggered too
 19a. Ensure thermostat is switched on. Maybe when adding integration?
-20.	Countdown go blue - it's because it needs to be made active if boost is active. As it's not a timer anymore, it isn't active.
 22. Add icon for integration
-22.	Check services – what has been created? Can we integrate timer services overall or at least hide them?
 23.	All rooms boost
 24.	Make the temperature slider dynamic by taking the min and max settings from the thermostat?
 25. Dependencies on adding integration
+
+Don't think needed:
+20.	Countdown go blue - it's because it needs to be made active if boost is active. As it's not a timer anymore, it isn't active.
