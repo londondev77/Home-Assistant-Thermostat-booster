@@ -17,6 +17,7 @@ from .const import (
     UNIQUE_ID_TIME_SELECTOR,
 )
 from homeassistant.const import STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
+from .scheduler_utils import get_scheduler_switches_for_thermostat
 from .timer_manager import async_get_timer_registry
 
 _SNAPSHOT_STORAGE_VERSION = 1
@@ -27,39 +28,6 @@ _SNAPSHOT_RETRIGGER_DELAY = 10
 _SNAPSHOT_RETRIGGER_PENDING_KEY = "snapshot_retrigger_pending"
 _TEMP_SNAPSHOT_STORAGE_VERSION = 1
 _TEMP_SNAPSHOT_STORAGE_KEY = f"{DOMAIN}.temperature_snapshot"
-
-
-def _matches_tag(tags, thermostat_name: str) -> bool:
-    if tags is None:
-        return False
-    if isinstance(tags, str):
-        return thermostat_name.lower() in tags.lower()
-    if isinstance(tags, list):
-        for tag in tags:
-            if isinstance(tag, str) and thermostat_name.lower() in tag.lower():
-                return True
-    return False
-
-
-def _get_scheduler_switches(hass: HomeAssistant, thermostat_name: str) -> list[str]:
-    """Return scheduler switch entity_ids matching the thermostat tag."""
-    entity_reg = er.async_get(hass)
-    scheduler_entities = [
-        entry.entity_id
-        for entry in entity_reg.entities.values()
-        if entry.domain == "switch" and (entry.platform or "").lower() == "scheduler"
-    ]
-
-    matched: list[str] = []
-    for entity_id in scheduler_entities:
-        state = hass.states.get(entity_id)
-        if state is None:
-            continue
-        if state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-            continue
-        if _matches_tag(state.attributes.get("tags"), thermostat_name):
-            matched.append(entity_id)
-    return matched
 
 
 async def _load_snapshot_store(
@@ -171,7 +139,7 @@ async def async_create_scheduler_scene(
     hass: HomeAssistant, entry_id: str, thermostat_name: str
 ) -> list[str]:
     """Persist scheduler switch states and return the entity_ids."""
-    scheduler_switches = _get_scheduler_switches(hass, thermostat_name)
+    scheduler_switches = get_scheduler_switches_for_thermostat(hass, thermostat_name)
     if not scheduler_switches:
         return []
 
@@ -388,7 +356,7 @@ async def async_finish_boost_for_entry(hass: HomeAssistant, entry_id: str) -> No
 
     thermostat_name = data[DATA_THERMOSTAT_NAME]
     schedule_override_active = _is_switch_on(hass, entry_id, UNIQUE_ID_SCHEDULE_OVERRIDE)
-    scheduler_switches = _get_scheduler_switches(hass, thermostat_name)
+    scheduler_switches = get_scheduler_switches_for_thermostat(hass, thermostat_name)
     no_schedules_defined = not scheduler_switches
 
     if schedule_override_active or no_schedules_defined:

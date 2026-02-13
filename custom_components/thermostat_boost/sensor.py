@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Callable
 
 import voluptuous as vol
@@ -43,6 +43,7 @@ from .const import (
     UNIQUE_ID_TIME_SELECTOR,
 )
 from .entity_base import ThermostatBoostEntity
+from .scheduler_utils import get_scheduler_switches_for_thermostat
 from .timer_manager import async_get_timer_registry
 
 _START_BOOST_SERVICE_SCHEMA = vol.Schema(
@@ -148,13 +149,21 @@ class BoostFinishSensor(ThermostatBoostEntity, SensorEntity, RestoreEntity):
     async def async_added_to_hass(self) -> None:
         """Restore state on startup and attach timer listeners."""
         await super().async_added_to_hass()
+        restored_end: datetime | None = None
         if (state := await self.async_get_last_state()) is not None:
             if state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE):
                 parsed = dt_util.parse_datetime(state.state)
                 if parsed is not None:
                     self._native_value = parsed
+                    restored_end = dt_util.as_utc(parsed)
                 else:
                     self._native_value = state.state
+            if restored_end is None:
+                end_time = state.attributes.get("end_time")
+                if isinstance(end_time, str):
+                    parsed_end = dt_util.parse_datetime(end_time)
+                    if parsed_end is not None:
+                        restored_end = dt_util.as_utc(parsed_end)
 
         registry = await async_get_timer_registry(self.hass)
         self._timer = await registry.async_get_timer(
@@ -162,6 +171,7 @@ class BoostFinishSensor(ThermostatBoostEntity, SensorEntity, RestoreEntity):
             self._data[CONF_THERMOSTAT],
             self._data[DATA_THERMOSTAT_NAME],
         )
+        await self._async_restore_missing_timer(restored_end)
         self._remove_listener = self._timer.add_listener(self._handle_timer_update)
         self._handle_timer_update()
 
@@ -192,6 +202,17 @@ class BoostFinishSensor(ThermostatBoostEntity, SensorEntity, RestoreEntity):
     def native_value(self):
         """Return the current value."""
         return self._native_value
+
+    async def _async_restore_missing_timer(self, restored_end: datetime | None) -> None:
+        """Recreate timer from restored sensor state if storage was unavailable."""
+        if self._timer is None or restored_end is None:
+            return
+        if self._timer.snapshot().end is not None:
+            return
+        now = dt_util.utcnow()
+        if restored_end <= now:
+            return
+        await self._timer.async_start(restored_end - now)
 
     async def async_start_boost(
         self,
@@ -304,7 +325,7 @@ async def async_start_boost_for_entry(
         hass, entry_id, UNIQUE_ID_SCHEDULE_OVERRIDE
     )
     if not boost_was_active:
-        scheduler_switches = _get_scheduler_switches_for_thermostat(
+        scheduler_switches = get_scheduler_switches_for_thermostat(
             hass, data[DATA_THERMOSTAT_NAME]
         )
         no_schedules_defined = not scheduler_switches
@@ -410,35 +431,3 @@ def _is_switch_on(hass: HomeAssistant, entry_id: str, unique_id_suffix: str) -> 
         return False
     state = hass.states.get(entity_id)
     return state is not None and state.state == STATE_ON
-
-
-@callback
-def _get_scheduler_switches_for_thermostat(
-    hass: HomeAssistant, thermostat_name: str
-) -> list[str]:
-    """Return scheduler switches that match thermostat tags."""
-    entity_reg = er.async_get(hass)
-    matched: list[str] = []
-    thermostat_name_lower = thermostat_name.lower()
-
-    for entry in entity_reg.entities.values():
-        if entry.domain != "switch" or (entry.platform or "").lower() != "scheduler":
-            continue
-
-        state = hass.states.get(entry.entity_id)
-        if state is None or state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-            continue
-
-        tags = state.attributes.get("tags")
-        if isinstance(tags, str):
-            if thermostat_name_lower in tags.lower():
-                matched.append(entry.entity_id)
-            continue
-
-        if isinstance(tags, list):
-            for tag in tags:
-                if isinstance(tag, str) and thermostat_name_lower in tag.lower():
-                    matched.append(entry.entity_id)
-                    break
-
-    return matched
