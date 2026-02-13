@@ -338,7 +338,7 @@
 
             const update = () => {
               if (!isActive) {
-                container.innerText = '-';
+                container.innerText = 'Inactive';
                 return;
               }
               const endIso =
@@ -347,7 +347,7 @@
                 null;
               const endTime = normalizeDate(endIso);
               if (!endTime) {
-                container.innerText = '-';
+                container.innerText = 'Inactive';
                 return;
               }
               const now = new Date();
@@ -367,7 +367,7 @@
                 clearInterval(card.timer);
                 card.timer = null;
               }
-              container.innerText = '-';
+              container.innerText = 'Inactive';
               return '';
             }
 
@@ -458,7 +458,7 @@
               {
                 type: "custom:slider-entity-row",
                 entity: resolved.boostTemperatureEntityId,
-                name: "Temperature",
+                name: "Boost Temperature",
                 full_row: true,
                 show_icon: true,
                 max: 25,
@@ -489,7 +489,7 @@
               {
                 type: "custom:slider-entity-row",
                 entity: resolved.boostTimeEntityId,
-                name: "Boost Time",
+                name: "Boost Duration",
                 full_row: true,
                 show_icon: true,
                 toggle: false,
@@ -540,7 +540,7 @@
               {
                 type: "custom:thermostat-boost-countdown",
                 entity: resolved.boostFinishEntityId,
-                name: "Boost Left",
+                name: "Boost Time",
                 icon: "mdi:timer",
               },
             ],
@@ -634,7 +634,7 @@
           ],
           card: {
             type: "markdown",
-            content: "Schedule override not available when boost is active.",
+            content: "Schedule Override is unavailable while boost is active.",
           },
         });
       } else if (resolved.scheduleOverrideEntityId) {
@@ -696,7 +696,7 @@
           ],
           card: {
             type: "markdown",
-            content: "Changing schedules is not availalable when boost is active",
+            content: "Schedule editing is unavailable while boost is active.",
           },
         });
       } else if (resolved.thermostatEntityId) {
@@ -791,7 +791,7 @@
         finishIso = stateObj?.attributes?.end_time || null;
       }
       const finish = finishIso ? parseTimestamp(finishIso) : NaN;
-      if (Number.isNaN(finish)) return "-";
+      if (Number.isNaN(finish)) return "Inactive";
 
       const now = Date.now();
       let remainingSec = Math.max(0, Math.floor((finish - now) / 1000));
@@ -963,7 +963,7 @@
     setConfig(config) {
       this._config = { ...(config || {}) };
       this._icon.icon = this._config.icon || "mdi:timer";
-      this._name.textContent = this._config.name || "Boost Left";
+      this._name.textContent = this._config.name || "Boost Time";
       this._update();
     }
 
@@ -988,13 +988,13 @@
 
     _update() {
       if (!this._config?.entity) {
-        this._value.textContent = "-";
+        this._value.textContent = "Inactive";
         return;
       }
       const hass =
         this._hass || document.querySelector("home-assistant")?.hass || null;
       if (!hass) {
-        this._value.textContent = "-";
+        this._value.textContent = "Inactive";
         return;
       }
       this._hass = hass;
@@ -1005,7 +1005,7 @@
       }
       const finish = finishIso ? parseTimestamp(finishIso) : NaN;
       if (Number.isNaN(finish)) {
-        this._value.textContent = "-";
+        this._value.textContent = "Inactive";
         return;
       }
       const now = Date.now();
