@@ -5,7 +5,8 @@ from __future__ import annotations
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTemperature
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util.unit_conversion import TemperatureConverter
@@ -116,6 +117,7 @@ class BoostTemperatureNumber(ThermostatBoostEntity, NumberEntity, RestoreEntity)
             entity_name="Boost Temperature",
             unique_id_suffix=UNIQUE_ID_BOOST_TEMPERATURE,
         )
+        self._thermostat_entity_id = thermostat_entity_id
         min_temp, max_temp = _dynamic_boost_temperature_bounds(
             hass, thermostat_entity_id
         )
@@ -136,6 +138,42 @@ class BoostTemperatureNumber(ThermostatBoostEntity, NumberEntity, RestoreEntity)
                 self._native_value = float(state.state)
             except (TypeError, ValueError):
                 pass
+        self.async_on_remove(
+            async_track_state_change_event(
+                self.hass,
+                [self._thermostat_entity_id],
+                self._async_handle_thermostat_state_change,
+            )
+        )
+        self._async_refresh_dynamic_bounds()
+
+    @callback
+    def _async_handle_thermostat_state_change(self, _event) -> None:
+        """Refresh slider bounds when thermostat attributes change."""
+        self._async_refresh_dynamic_bounds()
+
+    @callback
+    def _async_refresh_dynamic_bounds(self) -> None:
+        """Recompute and apply min/max bounds from thermostat state."""
+        min_temp, max_temp = _dynamic_boost_temperature_bounds(
+            self.hass, self._thermostat_entity_id
+        )
+        if (
+            self._attr_native_min_value == min_temp
+            and self._attr_native_max_value == max_temp
+        ):
+            return
+
+        self._attr_native_min_value = min_temp
+        self._attr_native_max_value = max_temp
+
+        if self._native_value is not None:
+            if self._native_value < min_temp:
+                self._native_value = min_temp
+            elif self._native_value > max_temp:
+                self._native_value = max_temp
+
+        self.async_write_ha_state()
 
     @property
     def native_value(self) -> float | None:
