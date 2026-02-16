@@ -1,6 +1,6 @@
 /* Thermostat Boost Lovelace Card */
 (() => {
-  const VERSION = "0.9.13";
+  const VERSION = "0.9.24";
   const DOMAIN = "thermostat_boost";
   const CARD_TYPE = "thermostat-boost-card";
   const BOOST_TEMP_SUFFIX = "_boost_temperature";
@@ -8,6 +8,11 @@
   const BOOST_ACTIVE_SUFFIX = "_boost_active";
   const BOOST_FINISH_SUFFIX = "_boost_finish";
   const SCHEDULE_OVERRIDE_SUFFIX = "_schedule_override";
+  const SCHEDULE_SWITCH_LOCK_TOOLTIP =
+    "Turning schedules on/off is disabled when either a boost is active or schedule override is on";
+  const SCHEDULE_OVERRIDE_LOCK_TOOLTIP =
+    "Schedule override cannot be changed when a boost is active";
+  const DISABLED_TOGGLE_OPACITY = "20%";
 
   const computeLabel = (device) =>
     device?.name_by_user || device?.name || device?.id || "Thermostat Boost";
@@ -58,6 +63,8 @@
       this._mainStackConfig = null;
       this._bubbleHookTimer = null;
       this._bubbleCountdownTimer = null;
+      this._schedulerLockRefreshTimer = null;
+      this._pendingScheduleOverrideLockUntil = 0;
 
       const style = document.createElement("style");
       style.textContent = `
@@ -79,6 +86,26 @@
       this._message.classList.add("message");
 
       this.shadowRoot.append(style, this._root);
+      this._root.addEventListener(
+        "click",
+        (ev) => this._handleSchedulerLockEvent(ev),
+        true
+      );
+      this._root.addEventListener(
+        "pointerdown",
+        (ev) => this._handleSchedulerLockEvent(ev),
+        true
+      );
+      this._root.addEventListener(
+        "keydown",
+        (ev) => this._handleSchedulerLockEvent(ev),
+        true
+      );
+      this._root.addEventListener(
+        "mousemove",
+        (ev) => this._handleSchedulerLockHover(ev),
+        true
+      );
     }
 
     static getConfigElement() {
@@ -104,6 +131,7 @@
       this._hass = hass;
       if (this._bubbleHeaderCard) this._bubbleHeaderCard.hass = hass;
       if (this._mainStack) this._mainStack.hass = hass;
+      this._applySchedulerLockState();
       this._ensureResolved();
     }
 
@@ -115,6 +143,10 @@
       if (this._bubbleCountdownTimer) {
         clearInterval(this._bubbleCountdownTimer);
         this._bubbleCountdownTimer = null;
+      }
+      if (this._schedulerLockRefreshTimer) {
+        clearTimeout(this._schedulerLockRefreshTimer);
+        this._schedulerLockRefreshTimer = null;
       }
       if (this._bubbleHeaderCard?.timer) {
         clearInterval(this._bubbleHeaderCard.timer);
@@ -592,50 +624,7 @@
         });
       }
 
-      if (resolved.scheduleOverrideEntityId && resolved.boostActiveEntityId) {
-        cards.push({
-          type: "conditional",
-          conditions: [
-            {
-              condition: "state",
-              entity: resolved.boostActiveEntityId,
-              state: "off",
-            },
-          ],
-          card: {
-            type: "entities",
-            show_header_toggle: false,
-            entities: [
-              {
-                entity: resolved.scheduleOverrideEntityId,
-                name: "Schedule Override",
-                icon: "mdi:grid-off",
-                tap_action: {
-                  action: "none",
-                },
-                hold_action: {
-                  action: "none",
-                },
-              },
-            ],
-          },
-        });
-
-        cards.push({
-          type: "conditional",
-          conditions: [
-            {
-              condition: "state",
-              entity: resolved.boostActiveEntityId,
-              state: "on",
-            },
-          ],
-          card: {
-            type: "markdown",
-            content: "Schedule Override is unavailable while boost is active.",
-          },
-        });
-      } else if (resolved.scheduleOverrideEntityId) {
+      if (resolved.scheduleOverrideEntityId) {
         cards.push({
           type: "entities",
           show_header_toggle: false,
@@ -655,49 +644,7 @@
         });
       }
 
-      if (resolved.thermostatEntityId && resolved.boostActiveEntityId) {
-        const thermostatName = resolved.label || resolved.thermostatEntityId;
-        cards.push({
-          type: "conditional",
-          conditions: [
-            {
-              condition: "state",
-              entity: resolved.boostActiveEntityId,
-              state: "off",
-            },
-          ],
-          card: {
-            type: "custom:scheduler-card",
-            tags: [thermostatName],
-            include: [resolved.thermostatEntityId],
-            display_options: {
-              primary_info: "{entity}",
-              secondary_info: ["days"],
-              icon: "entity",
-            },
-            discover_existing: false,
-            grid_options: null,
-            columns: 180,
-            rows: "auto",
-            title: false,
-			default_editor: "scheme",
-          },
-        });
-        cards.push({
-          type: "conditional",
-          conditions: [
-            {
-              condition: "state",
-              entity: resolved.boostActiveEntityId,
-              state: "on",
-            },
-          ],
-          card: {
-            type: "markdown",
-            content: "Schedule editing is unavailable while boost is active.",
-          },
-        });
-      } else if (resolved.thermostatEntityId) {
+      if (resolved.thermostatEntityId) {
         const thermostatName = resolved.label || resolved.thermostatEntityId;
         cards.push({
           type: "custom:scheduler-card",
@@ -713,6 +660,7 @@
           columns: 180,
           rows: "auto",
           title: false,
+          default_editor: "scheme",
         });
       }
 
@@ -746,6 +694,270 @@
       this._root.append(stackCard);
       this._mainStack = stackCard;
       if (this._hass) this._mainStack.hass = this._hass;
+      this._scheduleSchedulerLockRefresh();
+    }
+
+    _isScheduleOverrideOn() {
+      const entityId = this._resolved?.scheduleOverrideEntityId;
+      if (!entityId || !this._hass) return false;
+      const stateOn = this._hass.states?.[entityId]?.state === "on";
+      if (stateOn) {
+        this._pendingScheduleOverrideLockUntil = 0;
+        return true;
+      }
+      return Date.now() < this._pendingScheduleOverrideLockUntil;
+    }
+
+    _isBoostActive() {
+      const entityId = this._resolved?.boostActiveEntityId;
+      if (!entityId || !this._hass) return false;
+      return this._hass.states?.[entityId]?.state === "on";
+    }
+
+    _isSchedulerSwitchLockActive() {
+      return this._isBoostActive() || this._isScheduleOverrideOn();
+    }
+
+    _pathContainsEntity(path, entityId) {
+      if (!entityId) return false;
+      return path.some((node) => {
+        const tag = node?.tagName?.toLowerCase?.();
+        if (tag === "hui-toggle-entity-row") {
+          return (
+            node?.config?.entity === entityId ||
+            node?.entityId === entityId
+          );
+        }
+        if (node?.config?.entity === entityId) return true;
+        if (node?.entityId === entityId) return true;
+        if (typeof node?.getAttribute === "function") {
+          return (
+            node.getAttribute("entity") === entityId ||
+            node.getAttribute("data-entity") === entityId ||
+            node.getAttribute("data-entity-id") === entityId
+          );
+        }
+        return false;
+      });
+    }
+
+    _handleSchedulerLockEvent(ev) {
+      this._noteScheduleOverrideIntent(ev);
+      this._handleSchedulerLockClick(ev);
+    }
+
+    _noteScheduleOverrideIntent(ev) {
+      const entityId = this._resolved?.scheduleOverrideEntityId;
+      if (!entityId || !this._hass) return;
+      if (this._hass.states?.[entityId]?.state === "on") {
+        this._pendingScheduleOverrideLockUntil = 0;
+        return;
+      }
+
+      const path = typeof ev.composedPath === "function" ? ev.composedPath() : [];
+      const clickedOverrideRow = this._pathContainsEntity(path, entityId);
+      if (!clickedOverrideRow) return;
+
+      this._pendingScheduleOverrideLockUntil = Date.now() + 1500;
+      this._applySchedulerLockState();
+    }
+
+    _handleSchedulerLockClick(ev) {
+      const path = typeof ev.composedPath === "function" ? ev.composedPath() : [];
+      const toggleSelector =
+        "ha-switch, mwc-switch, .switch, [role='switch'], input[type='checkbox']";
+      const toggleNode = path.find((node) => node?.matches?.(toggleSelector));
+      const onToggle = Boolean(toggleNode);
+      if (!onToggle) return;
+
+      const scheduleOverrideEntityId = this._resolved?.scheduleOverrideEntityId;
+      const onScheduleOverrideToggle = this._pathContainsEntity(
+        path,
+        scheduleOverrideEntityId
+      );
+      if (onScheduleOverrideToggle) {
+        if (!this._isBoostActive()) return;
+        if (toggleNode?.style) {
+          toggleNode.style.cursor = "not-allowed";
+        }
+        toggleNode?.setAttribute?.("title", SCHEDULE_OVERRIDE_LOCK_TOOLTIP);
+      } else {
+        if (!this._isSchedulerSwitchLockActive()) return;
+        const inSchedulerCard = path.some(
+          (node) => node?.tagName?.toLowerCase?.() === "scheduler-card"
+        );
+        if (!inSchedulerCard) return;
+        if (toggleNode?.style) {
+          toggleNode.style.cursor = "not-allowed";
+        }
+        toggleNode?.setAttribute?.("title", SCHEDULE_SWITCH_LOCK_TOOLTIP);
+      }
+
+      if (ev.type === "keydown") {
+        const key = ev.key || "";
+        if (key === "Tab" || key === "Escape") return;
+      }
+
+      this._clearSchedulerCardFocus(path);
+
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (typeof ev.stopImmediatePropagation === "function") {
+        ev.stopImmediatePropagation();
+      }
+    }
+
+    _clearSchedulerCardFocus(path = null) {
+      const active =
+        this.shadowRoot?.activeElement ||
+        document.activeElement ||
+        null;
+      if (active && typeof active.blur === "function") {
+        active.blur();
+      }
+
+      const nodes = Array.isArray(path) ? path : [];
+      for (const node of nodes) {
+        if (typeof node?.blur === "function") {
+          node.blur();
+        }
+      }
+    }
+
+    _handleSchedulerLockHover(ev) {
+      const toggleSelector =
+        "ha-switch, mwc-switch, .switch, [role='switch'], input[type='checkbox']";
+      const path = typeof ev.composedPath === "function" ? ev.composedPath() : [];
+      const toggleNode = path.find((node) => node?.matches?.(toggleSelector));
+      if (!toggleNode) {
+        this.style.cursor = "";
+        return;
+      }
+
+      const onScheduleOverrideToggle = this._pathContainsEntity(
+        path,
+        this._resolved?.scheduleOverrideEntityId
+      );
+      if (onScheduleOverrideToggle) {
+        const lockOverride = this._isBoostActive();
+        if (toggleNode?.style) {
+          toggleNode.style.cursor = lockOverride ? "not-allowed" : "";
+        }
+        if (lockOverride) {
+          toggleNode.setAttribute("title", SCHEDULE_OVERRIDE_LOCK_TOOLTIP);
+        } else {
+          toggleNode.removeAttribute("title");
+        }
+        this.style.cursor = lockOverride ? "not-allowed" : "";
+        return;
+      }
+
+      if (!this._isSchedulerSwitchLockActive()) {
+        this.style.cursor = "";
+        return;
+      }
+      const inSchedulerCard = path.some(
+        (node) => node?.tagName?.toLowerCase?.() === "scheduler-card"
+      );
+      if (!inSchedulerCard) {
+        this.style.cursor = "";
+        return;
+      }
+
+      if (toggleNode?.style) {
+        toggleNode.style.cursor = "not-allowed";
+      }
+      toggleNode?.setAttribute?.("title", SCHEDULE_SWITCH_LOCK_TOOLTIP);
+      this.style.cursor = toggleNode ? "not-allowed" : "";
+    }
+
+    _scheduleSchedulerLockRefresh() {
+      this._applySchedulerLockState();
+      if (this._schedulerLockRefreshTimer) {
+        clearTimeout(this._schedulerLockRefreshTimer);
+      }
+      // Re-apply a few times because scheduler-card internals can mount asynchronously.
+      this._schedulerLockRefreshTimer = setTimeout(() => {
+        this._applySchedulerLockState();
+      }, 100);
+      setTimeout(() => this._applySchedulerLockState(), 300);
+      setTimeout(() => this._applySchedulerLockState(), 800);
+    }
+
+    _applySchedulerLockState() {
+      const schedulerCards = this._queryDeepAll("scheduler-card");
+      const lock = this._isSchedulerSwitchLockActive();
+      for (const schedulerCard of schedulerCards) {
+        const toggles = this._queryDeepAllFrom(
+          schedulerCard,
+          "ha-switch, mwc-switch, .switch, [role='switch'], input[type='checkbox']"
+        );
+        schedulerCard.style.pointerEvents = "";
+        toggles.forEach((toggle) => {
+          toggle.style.pointerEvents = "";
+          toggle.style.cursor = lock ? "not-allowed" : "";
+          this._setMdcSwitchOpacity(toggle, lock);
+          if (lock) {
+            toggle.setAttribute("title", SCHEDULE_SWITCH_LOCK_TOOLTIP);
+          } else {
+            toggle.removeAttribute("title");
+          }
+          if (lock && typeof toggle.blur === "function") toggle.blur();
+        });
+      }
+
+      const overrideToggleLock = this._isBoostActive();
+      const overrideEntityId = this._resolved?.scheduleOverrideEntityId;
+      const allToggles = this._queryDeepAll(
+        "ha-switch, mwc-switch, .switch, [role='switch'], input[type='checkbox']"
+      );
+      allToggles.forEach((toggle) => {
+        const parentPath = [];
+        let node = toggle;
+        while (node) {
+          parentPath.push(node);
+          node = node.parentNode || node.host || null;
+        }
+        if (!this._pathContainsEntity(parentPath, overrideEntityId)) return;
+        toggle.style.pointerEvents = "";
+        toggle.style.cursor = overrideToggleLock ? "not-allowed" : "";
+        this._setMdcSwitchOpacity(toggle, overrideToggleLock);
+        if (overrideToggleLock) {
+          toggle.setAttribute("title", SCHEDULE_OVERRIDE_LOCK_TOOLTIP);
+          if (typeof toggle.blur === "function") toggle.blur();
+        } else {
+          toggle.removeAttribute("title");
+        }
+      });
+    }
+
+    _setMdcSwitchOpacity(toggle, locked) {
+      const mdcSwitch = this._findMdcSwitch(toggle);
+      if (!mdcSwitch?.style) return;
+      mdcSwitch.style.opacity = locked ? DISABLED_TOGGLE_OPACITY : "";
+    }
+
+    _findMdcSwitch(toggle) {
+      if (!toggle) return null;
+      if (toggle.classList?.contains("mdc-switch")) {
+        return toggle;
+      }
+
+      if (typeof toggle.closest === "function") {
+        const closest = toggle.closest(".mdc-switch");
+        if (closest) return closest;
+      }
+
+      if (toggle.shadowRoot?.querySelector) {
+        const inShadow = toggle.shadowRoot.querySelector(".mdc-switch");
+        if (inShadow) return inShadow;
+      }
+
+      if (typeof toggle.querySelector === "function") {
+        return toggle.querySelector(".mdc-switch");
+      }
+
+      return null;
     }
 
     _queryDeep(selector) {
@@ -804,6 +1016,10 @@
     }
 
     _queryDeepAll(selector) {
+      return this._queryDeepAllFrom(this._root, selector);
+    }
+
+    _queryDeepAllFrom(root, selector) {
       const results = [];
       const visit = (node) => {
         if (!node) return;
@@ -826,7 +1042,7 @@
         }
       };
 
-      visit(this._root);
+      visit(root);
       return results;
     }
 
