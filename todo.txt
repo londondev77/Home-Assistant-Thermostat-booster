@@ -19,6 +19,8 @@ Done but needs testing
 18.	Reinstate 0 to 24 hours step 0.5
 19.	Add units to sliders
 22.	Check services – what has been created? Can we integrate timer services overall or at least hide them?
+24.	Make the temperature slider dynamic by taking the min and max settings from the thermostat?
+
 
 To do
 Test:
@@ -27,7 +29,6 @@ Test:
 19a. Ensure thermostat is switched on. Maybe when adding integration?
 22. Add icon for integration
 23.	All rooms boost
-24.	Make the temperature slider dynamic by taking the min and max settings from the thermostat?
 25. Dependencies on adding integration
 
 Don't think needed:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import logging
 from typing import Callable
 
 import voluptuous as vol
@@ -45,6 +46,8 @@ from .const import (
 from .entity_base import ThermostatBoostEntity
 from .scheduler_utils import get_scheduler_switches_for_thermostat
 from .timer_manager import async_get_timer_registry
+
+_LOGGER = logging.getLogger(__name__)
 
 _START_BOOST_SERVICE_SCHEMA = vol.Schema(
     {
@@ -310,8 +313,16 @@ async def async_start_boost_for_entry(
     time: dict | str | None = None,
     temperature_c: float | None = None,
 ) -> None:
+    _LOGGER.debug(
+        "Start boost requested for %s (time=%s, temperature_c=%s)",
+        entry_id,
+        time,
+        temperature_c,
+    )
+
     data = hass.data.get(DOMAIN, {}).get(entry_id)
     if not data:
+        _LOGGER.debug("Start boost aborted for %s: entry not found", entry_id)
         raise HomeAssistantError(f"No thermostat_boost entry found for {entry_id}")
 
     registry = await async_get_timer_registry(hass)
@@ -323,6 +334,12 @@ async def async_start_boost_for_entry(
     boost_was_active = _is_switch_on(hass, entry_id, UNIQUE_ID_BOOST_ACTIVE)
     schedule_override_active = _is_switch_on(
         hass, entry_id, UNIQUE_ID_SCHEDULE_OVERRIDE
+    )
+    _LOGGER.debug(
+        "Start boost state for %s: boost_was_active=%s, schedule_override_active=%s",
+        entry_id,
+        boost_was_active,
+        schedule_override_active,
     )
     if not boost_was_active:
         scheduler_switches = get_scheduler_switches_for_thermostat(
@@ -341,6 +358,7 @@ async def async_start_boost_for_entry(
     if temperature_c is None:
         temperature_c = _get_number_value(hass, entry_id, UNIQUE_ID_BOOST_TEMPERATURE)
     if temperature_c is None:
+        _LOGGER.debug("Start boost aborted for %s: no boost temperature available", entry_id)
         raise HomeAssistantError("Unable to determine boost temperature.")
 
     if time is None:
@@ -350,6 +368,12 @@ async def async_start_boost_for_entry(
         duration = timedelta(hours=float(duration_hours))
     else:
         duration = _parse_duration_value(time)
+    _LOGGER.debug(
+        "Start boost resolved for %s: temperature_c=%s, duration=%s",
+        entry_id,
+        temperature_c,
+        duration,
+    )
 
     target_temp = temperature_c
     if hass.config.units.temperature_unit != UnitOfTemperature.CELSIUS:
@@ -368,8 +392,16 @@ async def async_start_boost_for_entry(
         },
         blocking=True,
     )
+    _LOGGER.debug(
+        "Applied boost target temperature for %s: thermostat=%s, target=%s (%s)",
+        entry_id,
+        data[CONF_THERMOSTAT],
+        target_temp,
+        hass.config.units.temperature_unit,
+    )
 
     await timer.async_start(duration)
+    _LOGGER.debug("Started boost timer for %s: end=%s", entry_id, timer.snapshot().end)
 
     boost_active_entity_id = _get_entity_id(hass, entry_id, UNIQUE_ID_BOOST_ACTIVE)
     if boost_active_entity_id:
@@ -378,6 +410,11 @@ async def async_start_boost_for_entry(
             "turn_on",
             {"entity_id": boost_active_entity_id},
             blocking=True,
+        )
+        _LOGGER.debug(
+            "Marked boost active for %s: entity_id=%s",
+            entry_id,
+            boost_active_entity_id,
         )
 
     if not boost_was_active and not schedule_override_active:
@@ -390,6 +427,16 @@ async def async_start_boost_for_entry(
                 "turn_off",
                 {"entity_id": scheduler_switches},
                 blocking=True,
+            )
+            _LOGGER.debug(
+                "Captured and disabled scheduler switches for %s: %s",
+                entry_id,
+                scheduler_switches,
+            )
+        else:
+            _LOGGER.debug(
+                "No scheduler switches matched for %s during boost start",
+                entry_id,
             )
 
 

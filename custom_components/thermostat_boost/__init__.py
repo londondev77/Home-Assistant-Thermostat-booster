@@ -64,7 +64,12 @@ async def _handle_timer_finished(hass: HomeAssistant, event) -> None:
     if not entry_id:
         return
 
-    await async_finish_boost_for_entry(hass, entry_id)
+    expired_while_offline = bool(event.data.get("expired_while_offline"))
+    await async_finish_boost_for_entry(
+        hass,
+        entry_id,
+        allow_retrigger=expired_while_offline,
+    )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

@@ -149,17 +149,36 @@ def _schedule_scheduler_retrigger(
     pending = _get_snapshot_retrigger_pending(hass)
     retrigger_unsubs = _get_snapshot_retrigger_unsub(hass)
     if entry_id in pending or entry_id in retrigger_unsubs:
+        _LOGGER.debug(
+            "Scheduler retrigger already pending for %s; skipping new request",
+            entry_id,
+        )
         return
 
     target_entities = sorted({entity_id for entity_id in to_turn_on if entity_id})
     if not target_entities:
+        _LOGGER.debug(
+            "Scheduler retrigger skipped for %s: no entities to retrigger",
+            entry_id,
+        )
         return
     pending.add(entry_id)
+    _LOGGER.debug(
+        "Scheduling scheduler retrigger for %s in %ss: %s",
+        entry_id,
+        _SNAPSHOT_RETRIGGER_DELAY,
+        target_entities,
+    )
 
     @callback
     def _retry(_now) -> None:
         pending.discard(entry_id)
         retrigger_unsubs.pop(entry_id, None)
+        _LOGGER.debug(
+            "Executing scheduled retrigger for %s: %s",
+            entry_id,
+            target_entities,
+        )
         hass.add_job(
             _async_retrigger_scheduler_switches(hass, entry_id, target_entities)
         )
@@ -174,8 +193,16 @@ async def _async_retrigger_scheduler_switches(
 ) -> None:
     # Retrigger is only valid immediately after boost-end restore.
     if _is_switch_on(hass, entry_id, UNIQUE_ID_BOOST_ACTIVE):
+        _LOGGER.debug(
+            "Scheduler retrigger skipped for %s: boost is active",
+            entry_id,
+        )
         return
     if _is_switch_on(hass, entry_id, UNIQUE_ID_SCHEDULE_OVERRIDE):
+        _LOGGER.debug(
+            "Scheduler retrigger skipped for %s: schedule override is active",
+            entry_id,
+        )
         return
 
     available_entities = [
@@ -187,20 +214,45 @@ async def _async_retrigger_scheduler_switches(
         )
     ]
     if not available_entities:
+        _LOGGER.debug(
+            "Scheduler retrigger skipped for %s: no available entities from %s",
+            entry_id,
+            entity_ids,
+        )
         return
 
     try:
+        _LOGGER.debug(
+            "Scheduler retrigger step 1 (turn_off) for %s: %s",
+            entry_id,
+            available_entities,
+        )
         await hass.services.async_call(
             "switch",
             "turn_off",
             {"entity_id": available_entities},
             blocking=True,
         )
+        _LOGGER.debug(
+            "Scheduler retrigger step 1 complete for %s: %s",
+            entry_id,
+            available_entities,
+        )
+        _LOGGER.debug(
+            "Scheduler retrigger step 2 (turn_on) for %s: %s",
+            entry_id,
+            available_entities,
+        )
         await hass.services.async_call(
             "switch",
             "turn_on",
             {"entity_id": available_entities},
             blocking=True,
+        )
+        _LOGGER.debug(
+            "Scheduler retrigger step 2 complete for %s: %s",
+            entry_id,
+            available_entities,
         )
     except HomeAssistantError as err:
         _LOGGER.warning(
@@ -217,6 +269,11 @@ async def async_create_scheduler_scene(
     """Persist scheduler switch states and return the entity_ids."""
     scheduler_switches = get_scheduler_switches_for_thermostat(hass, thermostat_name)
     if not scheduler_switches:
+        _LOGGER.debug(
+            "No scheduler switches found to snapshot for %s (%s)",
+            entry_id,
+            thermostat_name,
+        )
         return []
 
     snapshot: dict[str, str] = {}
@@ -225,6 +282,11 @@ async def async_create_scheduler_scene(
         if state is None or state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
             continue
         snapshot[entity_id] = state.state
+    _LOGGER.debug(
+        "Captured scheduler snapshot for %s: %s",
+        entry_id,
+        snapshot,
+    )
 
     store, data = await _load_snapshot_store(hass)
     data[entry_id] = snapshot
@@ -256,12 +318,20 @@ async def async_restore_scheduler_snapshot(
     snapshot = data.get(entry_id)
     if snapshot is None:
         _get_snapshot_restore_pending(hass).pop(entry_id, None)
+        _LOGGER.debug(
+            "No scheduler snapshot stored for %s; nothing to restore",
+            entry_id,
+        )
         return
 
     if not snapshot:
         data.pop(entry_id, None)
         await store.async_save(data)
         _get_snapshot_restore_pending(hass).pop(entry_id, None)
+        _LOGGER.debug(
+            "Scheduler snapshot for %s was empty; cleared persisted snapshot",
+            entry_id,
+        )
         return
 
     missing_entities = [
@@ -287,21 +357,47 @@ async def async_restore_scheduler_snapshot(
 
     to_turn_on = [entity_id for entity_id, state in snapshot.items() if state == "on"]
     to_turn_off = [entity_id for entity_id, state in snapshot.items() if state != "on"]
+    _LOGGER.debug(
+        "Restoring scheduler snapshot for %s: turn_on=%s, turn_off=%s",
+        entry_id,
+        to_turn_on,
+        to_turn_off,
+    )
 
     try:
         if to_turn_on:
+            _LOGGER.debug(
+                "Scheduler restore action (turn_on) for %s: %s",
+                entry_id,
+                to_turn_on,
+            )
             await hass.services.async_call(
                 "switch",
                 "turn_on",
                 {"entity_id": to_turn_on},
                 blocking=True,
             )
+            _LOGGER.debug(
+                "Scheduler restore action complete (turn_on) for %s: %s",
+                entry_id,
+                to_turn_on,
+            )
         if to_turn_off:
+            _LOGGER.debug(
+                "Scheduler restore action (turn_off) for %s: %s",
+                entry_id,
+                to_turn_off,
+            )
             await hass.services.async_call(
                 "switch",
                 "turn_off",
                 {"entity_id": to_turn_off},
                 blocking=True,
+            )
+            _LOGGER.debug(
+                "Scheduler restore action complete (turn_off) for %s: %s",
+                entry_id,
+                to_turn_off,
             )
     except HomeAssistantError as err:
         _LOGGER.warning(
@@ -321,7 +417,13 @@ async def async_restore_scheduler_snapshot(
     data.pop(entry_id, None)
     await store.async_save(data)
     _get_snapshot_restore_pending(hass).pop(entry_id, None)
+    _LOGGER.debug("Scheduler snapshot restore completed for %s", entry_id)
     if allow_retrigger:
+        _LOGGER.debug(
+            "Scheduler restore enabling retrigger for %s with entities: %s",
+            entry_id,
+            to_turn_on,
+        )
         _schedule_scheduler_retrigger(hass, entry_id, to_turn_on)
 
 
@@ -449,10 +551,18 @@ def _get_entity_id(hass: HomeAssistant, entry_id: str, unique_id_suffix: str) ->
     return None
 
 
-async def async_finish_boost_for_entry(hass: HomeAssistant, entry_id: str) -> None:
+async def async_finish_boost_for_entry(
+    hass: HomeAssistant, entry_id: str, *, allow_retrigger: bool = False
+) -> None:
     """Finish boost for a config entry."""
+    _LOGGER.debug(
+        "Finish boost requested for %s (allow_retrigger=%s)",
+        entry_id,
+        allow_retrigger,
+    )
     data = hass.data.get(DOMAIN, {}).get(entry_id)
     if not data:
+        _LOGGER.debug("Finish boost skipped for %s: entry not found", entry_id)
         return
 
     registry = await async_get_timer_registry(hass)
@@ -462,6 +572,7 @@ async def async_finish_boost_for_entry(hass: HomeAssistant, entry_id: str) -> No
         data[DATA_THERMOSTAT_NAME],
     )
     await timer.async_cancel()
+    _LOGGER.debug("Cancelled boost timer for %s", entry_id)
 
     time_selector_entity_id = _get_entity_id(
         hass, entry_id, UNIQUE_ID_TIME_SELECTOR
@@ -473,6 +584,11 @@ async def async_finish_boost_for_entry(hass: HomeAssistant, entry_id: str) -> No
             {"entity_id": time_selector_entity_id, "value": 0},
             blocking=True,
         )
+        _LOGGER.debug(
+            "Reset boost time selector for %s: entity_id=%s",
+            entry_id,
+            time_selector_entity_id,
+        )
 
     boost_active_entity_id = _get_entity_id(hass, entry_id, UNIQUE_ID_BOOST_ACTIVE)
     if boost_active_entity_id:
@@ -482,11 +598,22 @@ async def async_finish_boost_for_entry(hass: HomeAssistant, entry_id: str) -> No
             {"entity_id": boost_active_entity_id},
             blocking=True,
         )
+        _LOGGER.debug(
+            "Marked boost inactive for %s: entity_id=%s",
+            entry_id,
+            boost_active_entity_id,
+        )
 
     thermostat_name = data[DATA_THERMOSTAT_NAME]
     schedule_override_active = _is_switch_on(hass, entry_id, UNIQUE_ID_SCHEDULE_OVERRIDE)
     scheduler_switches = get_scheduler_switches_for_thermostat(hass, thermostat_name)
     no_schedules_defined = not scheduler_switches
+    _LOGGER.debug(
+        "Finish boost restore mode for %s: schedule_override_active=%s, no_schedules_defined=%s",
+        entry_id,
+        schedule_override_active,
+        no_schedules_defined,
+    )
 
     if schedule_override_active or no_schedules_defined:
         restored = await async_restore_target_temperature_snapshot(
@@ -502,10 +629,19 @@ async def async_finish_boost_for_entry(hass: HomeAssistant, entry_id: str) -> No
                 schedule_override_active,
                 no_schedules_defined,
             )
+        else:
+            _LOGGER.debug("Restored thermostat target temperature for %s", entry_id)
         return
 
     await async_clear_target_temperature_snapshot(hass, entry_id)
-    await async_restore_scheduler_snapshot(hass, entry_id, allow_retrigger=True)
+    await async_restore_scheduler_snapshot(
+        hass, entry_id, allow_retrigger=allow_retrigger
+    )
+    _LOGGER.debug(
+        "Restored scheduler snapshot for %s (allow_retrigger=%s)",
+        entry_id,
+        allow_retrigger,
+    )
 
 
 @callback

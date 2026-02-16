@@ -143,7 +143,17 @@ class BoostTimer:
         # Direct callback fallback in case the event listener isn't registered.
         callback = self.hass.data.get(DOMAIN, {}).get("finish_callback")
         if callable(callback):
-            self.hass.async_create_task(callback(self.hass, self.entry_id))
+            try:
+                self.hass.async_create_task(
+                    callback(
+                        self.hass,
+                        self.entry_id,
+                        allow_retrigger=expired_while_offline,
+                    )
+                )
+            except TypeError:
+                # Backward compatibility for callbacks without the new kwarg.
+                self.hass.async_create_task(callback(self.hass, self.entry_id))
 
     @callback
     def unload(self) -> None:
