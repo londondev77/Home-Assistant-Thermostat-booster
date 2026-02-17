@@ -314,7 +314,7 @@ async def async_start_boost_for_entry(
     temperature_c: float | None = None,
 ) -> None:
     _LOGGER.debug(
-        "Start boost requested for %s (time=%s, temperature_c=%s)",
+        "Start boost started for %s (requested_time=%s, requested_temperature_c=%s)",
         entry_id,
         time,
         temperature_c,
@@ -322,7 +322,7 @@ async def async_start_boost_for_entry(
 
     data = hass.data.get(DOMAIN, {}).get(entry_id)
     if not data:
-        _LOGGER.debug("Start boost aborted for %s: entry not found", entry_id)
+        _LOGGER.debug("Start boost aborted for %s: config entry not found", entry_id)
         raise HomeAssistantError(f"No thermostat_boost entry found for {entry_id}")
 
     registry = await async_get_timer_registry(hass)
@@ -336,7 +336,7 @@ async def async_start_boost_for_entry(
         hass, entry_id, UNIQUE_ID_SCHEDULE_OVERRIDE
     )
     _LOGGER.debug(
-        "Start boost state for %s: boost_was_active=%s, schedule_override_active=%s",
+        "Start boost pre-check for %s: boost_was_active=%s, schedule_override_active=%s",
         entry_id,
         boost_was_active,
         schedule_override_active,
@@ -358,7 +358,10 @@ async def async_start_boost_for_entry(
     if temperature_c is None:
         temperature_c = _get_number_value(hass, entry_id, UNIQUE_ID_BOOST_TEMPERATURE)
     if temperature_c is None:
-        _LOGGER.debug("Start boost aborted for %s: no boost temperature available", entry_id)
+        _LOGGER.debug(
+            "Start boost aborted for %s: no boost temperature value available",
+            entry_id,
+        )
         raise HomeAssistantError("Unable to determine boost temperature.")
 
     if time is None:
@@ -369,7 +372,7 @@ async def async_start_boost_for_entry(
     else:
         duration = _parse_duration_value(time)
     _LOGGER.debug(
-        "Start boost resolved for %s: temperature_c=%s, duration=%s",
+        "Start boost resolved inputs for %s: temperature_c=%s, duration=%s",
         entry_id,
         temperature_c,
         duration,
@@ -393,7 +396,8 @@ async def async_start_boost_for_entry(
         blocking=True,
     )
     _LOGGER.debug(
-        "Applied boost target temperature for %s: thermostat=%s, target=%s (%s)",
+        "Start boost step complete for %s: target temperature applied "
+        "(thermostat=%s, target=%s %s)",
         entry_id,
         data[CONF_THERMOSTAT],
         target_temp,
@@ -401,7 +405,11 @@ async def async_start_boost_for_entry(
     )
 
     await timer.async_start(duration)
-    _LOGGER.debug("Started boost timer for %s: end=%s", entry_id, timer.snapshot().end)
+    _LOGGER.debug(
+        "Start boost step complete for %s: timer started (end=%s)",
+        entry_id,
+        timer.snapshot().end,
+    )
 
     boost_active_entity_id = _get_entity_id(hass, entry_id, UNIQUE_ID_BOOST_ACTIVE)
     if boost_active_entity_id:
@@ -412,7 +420,7 @@ async def async_start_boost_for_entry(
             blocking=True,
         )
         _LOGGER.debug(
-            "Marked boost active for %s: entity_id=%s",
+            "Start boost step complete for %s: boost marked active (entity_id=%s)",
             entry_id,
             boost_active_entity_id,
         )
@@ -429,13 +437,15 @@ async def async_start_boost_for_entry(
                 blocking=True,
             )
             _LOGGER.debug(
-                "Captured and disabled scheduler switches for %s: %s",
+                "Start boost step complete for %s: scheduler state snapshotted and "
+                "scheduler switches turned off: %s",
                 entry_id,
                 scheduler_switches,
             )
         else:
             _LOGGER.debug(
-                "No scheduler switches matched for %s during boost start",
+                "Start boost scheduler snapshot step skipped for %s: "
+                "no matching scheduler switches found",
                 entry_id,
             )
 

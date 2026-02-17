@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+import logging
 from typing import Callable
 
 from homeassistant.core import HomeAssistant, callback
@@ -15,6 +16,7 @@ from .const import DOMAIN, EVENT_TIMER_FINISHED
 
 STORAGE_VERSION = 1
 STORAGE_KEY = f"{DOMAIN}.timer"
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -108,6 +110,12 @@ class BoostTimer:
         """Start the timer for a duration."""
         now = dt_util.utcnow()
         if duration.total_seconds() <= 0:
+            _LOGGER.debug(
+                "Timer start for %s received non-positive duration (%s); "
+                "finishing immediately",
+                self.entry_id,
+                duration,
+            )
             await self.async_finish(expired_while_offline=False)
             return
 
@@ -115,6 +123,12 @@ class BoostTimer:
         await self._registry.async_set_end(self.entry_id, self._end)
         self._schedule_finish()
         self._notify()
+        _LOGGER.debug(
+            "Timer started for %s: duration=%s, end=%s",
+            self.entry_id,
+            duration,
+            self._end,
+        )
 
     async def async_cancel(self) -> None:
         """Cancel the timer."""
@@ -122,6 +136,7 @@ class BoostTimer:
         await self._registry.async_set_end(self.entry_id, None)
         self._cancel_schedule()
         self._notify()
+        _LOGGER.debug("Timer cancelled for %s", self.entry_id)
 
     async def async_finish(self, *, expired_while_offline: bool) -> None:
         """Finish the timer and fire the event."""
@@ -129,6 +144,11 @@ class BoostTimer:
         await self._registry.async_set_end(self.entry_id, None)
         self._cancel_schedule()
         self._notify()
+        _LOGGER.debug(
+            "Timer finished for %s (expired_while_offline=%s); dispatching finish event",
+            self.entry_id,
+            expired_while_offline,
+        )
 
         self.hass.bus.async_fire(
             EVENT_TIMER_FINISHED,
@@ -141,8 +161,15 @@ class BoostTimer:
         )
 
         # Direct callback fallback in case the event listener isn't registered.
-        callback = self.hass.data.get(DOMAIN, {}).get("finish_callback")
-        if callable(callback):
+        domain_data = self.hass.data.get(DOMAIN, {})
+        callback = domain_data.get("finish_callback")
+        has_finish_listener = "finish_listener" in domain_data
+        if callable(callback) and not has_finish_listener:
+            _LOGGER.debug(
+                "Timer finish for %s invoking direct finish callback fallback "
+                "(no finish listener registered)",
+                self.entry_id,
+            )
             try:
                 self.hass.async_create_task(
                     callback(
@@ -220,8 +247,20 @@ class TimerRegistry:
 
         # Handle timers that expired while HA was offline.
         if end is not None and end <= dt_util.utcnow():
+            _LOGGER.debug(
+                "Timer registry restore for %s found expired end=%s; "
+                "triggering offline-expiry finish flow",
+                entry_id,
+                end,
+            )
             await timer.async_finish(expired_while_offline=True)
         elif end is not None:
+            _LOGGER.debug(
+                "Timer registry restore for %s found active end=%s; "
+                "rescheduling finish callback",
+                entry_id,
+                end,
+            )
             timer._schedule_finish()
 
         self._timers[entry_id] = timer
