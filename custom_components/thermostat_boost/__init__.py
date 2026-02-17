@@ -68,7 +68,7 @@ async def _handle_timer_finished(hass: HomeAssistant, event) -> None:
     await async_finish_boost_for_entry(
         hass,
         entry_id,
-        allow_retrigger=expired_while_offline,
+        expired_while_offline=expired_while_offline,
     )
 
 

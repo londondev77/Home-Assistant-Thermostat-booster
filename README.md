@@ -60,10 +60,16 @@ The integration includes several safeguards specifically to handle restarts and 
   - If scheduler entities are `unknown`/`unavailable` during restore, restore is deferred and retried.
   - If a restore service call fails, restore is retried.
 
-- Double-switch retrigger (offline-expiry mitigation):
-  - After restoring schedules, switches that should be on are toggled `off -> on` again after a short delay.
-  - Retrigger is only enabled when a boost timer is detected as already expired during Home Assistant startup (offline expiry recovery).
-  - Normal manual finish or normal on-time expiry restores snapshot state without retrigger.
+- Offline-expiry scheduler action replay:
+  - For timers that expired while HA was offline, scheduler restore still uses availability retries before applying states.
+  - After ON-state schedules are restored, the integration calls `scheduler.run_action` for each restored ON schedule switch to ensure schedule actions are applied.
+
+- Current implementation note (for future cleanup):
+  - Additional retry/retrigger scaffolding is still present in code for tuning/rollback safety.
+  - Offline-expiry stabilization wait is currently configured to `0s`.
+  - Retrigger queue delay is currently configured to `0s`.
+  - Retrigger off->on step delay remains `10s`, but this path is currently inactive.
+  - The current offline-expiry path does not use the retrigger sequence; `scheduler.run_action` is used instead.
 
 - Finish callback fallback:
   - A direct callback path exists in addition to the event listener, reducing risk of missed finish handling.
@@ -114,7 +120,7 @@ If no matching Scheduler switches are found, boost temperature is still set and 
 
 ## Debug Logging
 
-To see detailed integration logs (including scheduler snapshot/restore/retrigger decisions), enable debug logging for the integration namespace.
+To see detailed integration logs (including scheduler snapshot/restore/retry decisions), enable debug logging for the integration namespace.
 
 Persistent (`configuration.yaml`):
 
@@ -197,7 +203,7 @@ target:
 3. Matching scheduler switches are snapshotted and turned off.
 4. Boost runs until timer expires (or until manual finish).
 5. On finish, scheduler snapshot is restored.
-6. If boost is recovered as expired while HA was offline, scheduler on-switches are retriggered (`off -> on`) as a resilience step.
+6. If boost is recovered as expired while HA was offline, scheduler snapshot restore includes availability retries and then calls `scheduler.run_action` for restored ON schedules.
 
 ## Optional Lovelace Card
 
@@ -213,7 +219,6 @@ If you use it, add the JS resource in Dashboard resources and configure the card
 
 - When Schedule Override is active, or no matching Scheduler switches are found for the thermostat, boost stores and restores the original thermostat target temperature.
 - Otherwise, boost end restores Scheduler switch state.
-- Scheduler retrigger (`off -> on`) only runs during offline-expiry recovery.
 - For best results, use this integration with Scheduler rules that define your normal temperature behavior.
 - Changes to thermostat `min_temp`/`max_temp` are handled dynamically and the Boost Temperature slider range updates automatically.
 

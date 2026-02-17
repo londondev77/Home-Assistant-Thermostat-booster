@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Callable
 
@@ -26,9 +27,13 @@ from .timer_manager import async_get_timer_registry
 _SNAPSHOT_STORAGE_VERSION = 1
 _SNAPSHOT_STORAGE_KEY = f"{DOMAIN}.scheduler_snapshot"
 _SNAPSHOT_RESTORE_RETRY_DELAY = 15
+_SNAPSHOT_RESTORE_STABILIZE_DELAY = 0
 _SNAPSHOT_RESTORE_PENDING_KEY = "snapshot_restore_pending"
 _SNAPSHOT_RESTORE_UNSUB_KEY = "snapshot_restore_unsub"
-_SNAPSHOT_RETRIGGER_DELAY = 10
+_SNAPSHOT_STABILIZE_PENDING_KEY = "snapshot_stabilize_pending"
+_SNAPSHOT_STABILIZE_UNSUB_KEY = "snapshot_stabilize_unsub"
+_SNAPSHOT_RETRIGGER_DELAY = 0
+_SNAPSHOT_RETRIGGER_STEP_DELAY = 10
 _SNAPSHOT_RETRIGGER_PENDING_KEY = "snapshot_retrigger_pending"
 _SNAPSHOT_RETRIGGER_UNSUB_KEY = "snapshot_retrigger_unsub"
 _FINISH_IN_PROGRESS_KEY = "finish_in_progress"
@@ -77,6 +82,18 @@ def _get_snapshot_retrigger_unsub(
     return domain_data.setdefault(_SNAPSHOT_RETRIGGER_UNSUB_KEY, {})
 
 
+def _get_snapshot_stabilize_pending(hass: HomeAssistant) -> set[str]:
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    return domain_data.setdefault(_SNAPSHOT_STABILIZE_PENDING_KEY, set())
+
+
+def _get_snapshot_stabilize_unsub(
+    hass: HomeAssistant,
+) -> dict[str, Callable[[], None]]:
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    return domain_data.setdefault(_SNAPSHOT_STABILIZE_UNSUB_KEY, {})
+
+
 def _get_finish_in_progress(hass: HomeAssistant) -> set[str]:
     domain_data = hass.data.setdefault(DOMAIN, {})
     return domain_data.setdefault(_FINISH_IN_PROGRESS_KEY, set())
@@ -87,6 +104,7 @@ def async_cancel_pending_scheduler_callbacks(hass: HomeAssistant, entry_id: str)
     """Cancel pending delayed scheduler callbacks for an entry."""
     restore_unsubs = _get_snapshot_restore_unsub(hass)
     retrigger_unsubs = _get_snapshot_retrigger_unsub(hass)
+    stabilize_unsubs = _get_snapshot_stabilize_unsub(hass)
 
     restore_cancelled = False
     if (unsub := restore_unsubs.pop(entry_id, None)) is not None:
@@ -98,36 +116,44 @@ def async_cancel_pending_scheduler_callbacks(hass: HomeAssistant, entry_id: str)
         unsub()
         retrigger_cancelled = True
 
+    stabilize_cancelled = False
+    if (unsub := stabilize_unsubs.pop(entry_id, None)) is not None:
+        unsub()
+        stabilize_cancelled = True
+
     _get_snapshot_restore_pending(hass).pop(entry_id, None)
+    _get_snapshot_stabilize_pending(hass).discard(entry_id)
     _get_snapshot_retrigger_pending(hass).discard(entry_id)
 
-    if restore_cancelled or retrigger_cancelled:
+    if restore_cancelled or retrigger_cancelled or stabilize_cancelled:
         _LOGGER.debug(
-            "Cancelled pending scheduler callbacks for %s (restore=%s, retrigger=%s)",
+            "Cancelled pending scheduler callbacks for %s "
+            "(restore=%s, stabilize=%s, retrigger=%s)",
             entry_id,
             restore_cancelled,
+            stabilize_cancelled,
             retrigger_cancelled,
         )
 
 
 def _schedule_snapshot_restore_retry(
-    hass: HomeAssistant, entry_id: str, *, allow_retrigger: bool
+    hass: HomeAssistant, entry_id: str, *, expired_while_offline: bool
 ) -> None:
     pending = _get_snapshot_restore_pending(hass)
-    pending[entry_id] = bool(pending.get(entry_id)) or allow_retrigger
+    pending[entry_id] = bool(pending.get(entry_id)) or expired_while_offline
 
     restore_unsubs = _get_snapshot_restore_unsub(hass)
     if entry_id in restore_unsubs:
         _LOGGER.debug(
             "Scheduler restore retry already queued for %s "
-            "(merged_allow_retrigger=%s)",
+            "(merged_expired_while_offline=%s)",
             entry_id,
             pending[entry_id],
         )
         return
 
     _LOGGER.debug(
-        "Queueing scheduler restore retry for %s in %ss (allow_retrigger=%s)",
+        "Queueing scheduler restore retry for %s in %ss (expired_while_offline=%s)",
         entry_id,
         _SNAPSHOT_RESTORE_RETRY_DELAY,
         pending[entry_id],
@@ -136,12 +162,12 @@ def _schedule_snapshot_restore_retry(
     @callback
     def _retry(_now) -> None:
         restore_unsubs.pop(entry_id, None)
-        allow = bool(pending.pop(entry_id, False))
+        expired_offline = bool(pending.pop(entry_id, False))
         hass.add_job(
             async_restore_scheduler_snapshot(
                 hass,
                 entry_id,
-                allow_retrigger=allow,
+                expired_while_offline=expired_offline,
             )
         )
 
@@ -246,6 +272,12 @@ async def _async_retrigger_scheduler_switches(
             available_entities,
         )
         _LOGGER.debug(
+            "Scheduler retrigger waiting %ss before step 2/2 for %s",
+            _SNAPSHOT_RETRIGGER_STEP_DELAY,
+            entry_id,
+        )
+        await asyncio.sleep(_SNAPSHOT_RETRIGGER_STEP_DELAY)
+        _LOGGER.debug(
             "Scheduler retrigger step 2/2 (turn_on) for %s: %s",
             entry_id,
             available_entities,
@@ -268,6 +300,41 @@ async def _async_retrigger_scheduler_switches(
             available_entities,
             err,
         )
+
+
+async def _async_run_scheduler_actions(
+    hass: HomeAssistant, entry_id: str, entity_ids: list[str]
+) -> None:
+    """Run Scheduler actions for restored ON-state schedule switches."""
+    target_entities = sorted({entity_id for entity_id in entity_ids if entity_id})
+    if not target_entities:
+        return
+
+    for entity_id in target_entities:
+        try:
+            _LOGGER.debug(
+                "Scheduler run_action started for %s via %s",
+                entry_id,
+                entity_id,
+            )
+            await hass.services.async_call(
+                "scheduler",
+                "run_action",
+                {"entity_id": entity_id},
+                blocking=True,
+            )
+            _LOGGER.debug(
+                "Scheduler run_action completed for %s via %s",
+                entry_id,
+                entity_id,
+            )
+        except HomeAssistantError as err:
+            _LOGGER.warning(
+                "Scheduler run_action failed for %s via %s: %s",
+                entry_id,
+                entity_id,
+                err,
+            )
 
 
 async def async_create_scheduler_scene(
@@ -302,7 +369,11 @@ async def async_create_scheduler_scene(
 
 
 async def async_restore_scheduler_snapshot(
-    hass: HomeAssistant, entry_id: str, *, allow_retrigger: bool = False
+    hass: HomeAssistant,
+    entry_id: str,
+    *,
+    expired_while_offline: bool = False,
+    skip_stabilize_delay: bool = False,
 ) -> None:
     """Restore scheduler switch states from persistent storage."""
     # Do not restore schedules while boost or override is active.
@@ -358,7 +429,43 @@ async def async_restore_scheduler_snapshot(
         _schedule_snapshot_restore_retry(
             hass,
             entry_id,
-            allow_retrigger=allow_retrigger,
+            expired_while_offline=expired_while_offline,
+        )
+        return
+
+    # Offline-expiry only: once entities are available, wait briefly before restore.
+    if expired_while_offline and not skip_stabilize_delay:
+        stabilize_pending = _get_snapshot_stabilize_pending(hass)
+        stabilize_unsubs = _get_snapshot_stabilize_unsub(hass)
+        if entry_id in stabilize_pending or entry_id in stabilize_unsubs:
+            _LOGGER.debug(
+                "Scheduler stabilize wait already queued for %s; skipping duplicate request",
+                entry_id,
+            )
+            return
+
+        stabilize_pending.add(entry_id)
+        _LOGGER.debug(
+            "Waiting %ss before restoring schedules for %s",
+            _SNAPSHOT_RESTORE_STABILIZE_DELAY,
+            entry_id,
+        )
+
+        @callback
+        def _stabilized_restore(_now) -> None:
+            stabilize_pending.discard(entry_id)
+            stabilize_unsubs.pop(entry_id, None)
+            hass.add_job(
+                async_restore_scheduler_snapshot(
+                    hass,
+                    entry_id,
+                    expired_while_offline=expired_while_offline,
+                    skip_stabilize_delay=True,
+                )
+            )
+
+        stabilize_unsubs[entry_id] = async_call_later(
+            hass, _SNAPSHOT_RESTORE_STABILIZE_DELAY, _stabilized_restore
         )
         return
 
@@ -389,6 +496,8 @@ async def async_restore_scheduler_snapshot(
                 entry_id,
                 to_turn_on,
             )
+            if expired_while_offline:
+                await _async_run_scheduler_actions(hass, entry_id, to_turn_on)
         if to_turn_off:
             _LOGGER.debug(
                 "Scheduler restore action (turn_off) started for %s: %s",
@@ -417,7 +526,7 @@ async def async_restore_scheduler_snapshot(
         _schedule_snapshot_restore_retry(
             hass,
             entry_id,
-            allow_retrigger=allow_retrigger,
+            expired_while_offline=expired_while_offline,
         )
         return
 
@@ -425,14 +534,12 @@ async def async_restore_scheduler_snapshot(
     await store.async_save(data)
     _get_snapshot_restore_pending(hass).pop(entry_id, None)
     _LOGGER.debug("Scheduler restore completed successfully for %s", entry_id)
-    if allow_retrigger:
+    if expired_while_offline:
         _LOGGER.debug(
-            "Scheduler restore for %s enabling retrigger (offline-expiry mitigation) "
-            "for ON-state entities: %s",
+            "Scheduler restore for %s completed in offline-expiry mode; "
+            "retrigger path disabled",
             entry_id,
-            to_turn_on,
         )
-        _schedule_scheduler_retrigger(hass, entry_id, to_turn_on)
 
 
 async def async_clear_scheduler_snapshot(hass: HomeAssistant, entry_id: str) -> None:
@@ -566,7 +673,7 @@ def _get_entity_id(hass: HomeAssistant, entry_id: str, unique_id_suffix: str) ->
 
 
 async def async_finish_boost_for_entry(
-    hass: HomeAssistant, entry_id: str, *, allow_retrigger: bool = False
+    hass: HomeAssistant, entry_id: str, *, expired_while_offline: bool = False
 ) -> None:
     """Finish boost for a config entry."""
     finish_in_progress = _get_finish_in_progress(hass)
@@ -580,9 +687,9 @@ async def async_finish_boost_for_entry(
 
     try:
         _LOGGER.debug(
-            "Finish boost started for %s (allow_retrigger=%s)",
+            "Finish boost started for %s (expired_while_offline=%s)",
             entry_id,
-            allow_retrigger,
+            expired_while_offline,
         )
         data = hass.data.get(DOMAIN, {}).get(entry_id)
         if not data:
@@ -673,19 +780,20 @@ async def async_finish_boost_for_entry(
             return
 
         _LOGGER.debug(
-            "Finish boost for %s selecting scheduler restore path (allow_retrigger=%s)",
+            "Finish boost for %s selecting scheduler restore path "
+            "(expired_while_offline=%s)",
             entry_id,
-            allow_retrigger,
+            expired_while_offline,
         )
         await async_clear_target_temperature_snapshot(hass, entry_id)
         await async_restore_scheduler_snapshot(
-            hass, entry_id, allow_retrigger=allow_retrigger
+            hass, entry_id, expired_while_offline=expired_while_offline
         )
         _LOGGER.debug(
             "Finish boost for %s invoked scheduler restore "
-            "(completion may be deferred/retried; allow_retrigger=%s)",
+            "(completion may be deferred/retried; expired_while_offline=%s)",
             entry_id,
-            allow_retrigger,
+            expired_while_offline,
         )
     finally:
         finish_in_progress.discard(entry_id)

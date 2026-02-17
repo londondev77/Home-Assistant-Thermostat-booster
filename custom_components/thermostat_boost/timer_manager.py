@@ -175,7 +175,7 @@ class BoostTimer:
                     callback(
                         self.hass,
                         self.entry_id,
-                        allow_retrigger=expired_while_offline,
+                        expired_while_offline=expired_while_offline,
                     )
                 )
             except TypeError:
