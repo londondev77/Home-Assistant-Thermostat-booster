@@ -21,7 +21,9 @@ from .const import (
     UNIQUE_ID_TIME_SELECTOR,
 )
 from homeassistant.const import STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
-from .scheduler_utils import get_scheduler_switches_for_thermostat
+from .scheduler_utils import (
+    get_scheduler_switches_for_thermostat,
+)
 from .timer_manager import async_get_timer_registry
 
 _SNAPSHOT_STORAGE_VERSION = 1
@@ -40,6 +42,21 @@ _FINISH_IN_PROGRESS_KEY = "finish_in_progress"
 _TEMP_SNAPSHOT_STORAGE_VERSION = 1
 _TEMP_SNAPSHOT_STORAGE_KEY = f"{DOMAIN}.temperature_snapshot"
 _LOGGER = logging.getLogger(__name__)
+
+# Current active behavior summary:
+# - Start boost:
+#   - On first start (when boost was not already active), store a pre-boost
+#     target-temperature snapshot.
+# - Finish boost with scheduler snapshot:
+#   - Restore pre-boost target temperature snapshot first (if present).
+#   - Restore scheduler switches from snapshot.
+#   - Run scheduler.run_action for schedules restored to ON.
+#   - Scheduler action then determines the effective target temperature.
+# - Offline-expiry path:
+#   - Restores schedules with availability retry safeguards.
+#   - Calls scheduler.run_action for restored ON schedules.
+# - Retrigger helpers remain in file for rollback/tuning, but are not currently used
+#   by the active offline-expiry finish path.
 
 
 async def _load_snapshot_store(
@@ -496,8 +513,6 @@ async def async_restore_scheduler_snapshot(
                 entry_id,
                 to_turn_on,
             )
-            if expired_while_offline:
-                await _async_run_scheduler_actions(hass, entry_id, to_turn_on)
         if to_turn_off:
             _LOGGER.debug(
                 "Scheduler restore action (turn_off) started for %s: %s",
@@ -515,6 +530,10 @@ async def async_restore_scheduler_snapshot(
                 entry_id,
                 to_turn_off,
             )
+        # Run scheduler actions for restored ON schedules so scheduler can re-apply
+        # effective setpoints after switches are restored.
+        if to_turn_on:
+            await _async_run_scheduler_actions(hass, entry_id, to_turn_on)
     except HomeAssistantError as err:
         _LOGGER.warning(
             "Scheduler snapshot restore failed for %s (on=%s, off=%s): %s",
@@ -573,7 +592,7 @@ def _get_current_target_temperature(
 
 async def async_store_target_temperature_snapshot(
     hass: HomeAssistant, entry_id: str, thermostat_entity_id: str
-) -> bool:
+) -> float | None:
     """Persist current thermostat target temperature for later restore."""
     temperature = _get_current_target_temperature(hass, thermostat_entity_id)
     if temperature is None:
@@ -582,7 +601,7 @@ async def async_store_target_temperature_snapshot(
             entry_id,
             thermostat_entity_id,
         )
-        return False
+        return None
 
     store, data = await _load_temperature_snapshot_store(hass)
     data[entry_id] = temperature
@@ -593,7 +612,7 @@ async def async_store_target_temperature_snapshot(
         thermostat_entity_id,
         temperature,
     )
-    return True
+    return temperature
 
 
 async def async_restore_target_temperature_snapshot(
@@ -785,7 +804,19 @@ async def async_finish_boost_for_entry(
             entry_id,
             expired_while_offline,
         )
-        await async_clear_target_temperature_snapshot(hass, entry_id)
+        pre_restore_temp_applied = bool(
+            await async_restore_target_temperature_snapshot(
+                hass,
+                entry_id,
+                data[CONF_THERMOSTAT],
+            )
+        )
+        _LOGGER.debug(
+            "Finish boost for %s pre-restore temperature step: "
+            "stored_temperature_applied=%s",
+            entry_id,
+            pre_restore_temp_applied,
+        )
         await async_restore_scheduler_snapshot(
             hass, entry_id, expired_while_offline=expired_while_offline
         )

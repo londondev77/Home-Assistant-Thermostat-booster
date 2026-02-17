@@ -23,13 +23,16 @@ It is designed for homes that already use schedules and need a reliable, tempora
   - set thermostat target temperature
   - start boost timer
   - mark boost active
+  - store pre-boost thermostat target temperature (first start when boost was not already active)
   - snapshot and disable matching Scheduler switches while boost is active
 - `finish_boost` service to:
   - cancel timer
   - mark boost inactive
   - reset time selector to `0`
+  - restore the pre-boost thermostat target temperature snapshot first (if present)
   - restore Scheduler switches to their pre-boost on/off states
-  - or restore the original thermostat target temperature when Schedule Override is active or no schedules are matched
+  - run `scheduler.run_action` for schedules restored to ON
+  - scheduler actions then determine the effective target temperature when applicable
 - Dynamic boost temperature slider bounds:
   - reads thermostat `min_temp` and `max_temp` attributes
   - if `min_temp` is unavailable, defaults to `0`
@@ -69,7 +72,22 @@ The integration includes several safeguards specifically to handle restarts and 
   - Offline-expiry stabilization wait is currently configured to `0s`.
   - Retrigger queue delay is currently configured to `0s`.
   - Retrigger off->on step delay remains `10s`, but this path is currently inactive.
-  - The current offline-expiry path does not use the retrigger sequence; `scheduler.run_action` is used instead.
+- The current offline-expiry path does not use the retrigger sequence; `scheduler.run_action` is used instead.
+
+- Start/finish schedule-state decision:
+  - Start boost stores a pre-boost thermostat target temperature snapshot (first start only).
+  - Finish boost (scheduler path) applies the pre-boost temperature snapshot first (if available).
+  - Finish boost then restores scheduler switch states.
+  - Finish boost then runs `scheduler.run_action` for schedules restored to ON.
+  - If a restored ON schedule has an action applicable "now", scheduler action typically overrides the pre-boost restore.
+  - If no restored ON schedule has an applicable action "now", the pre-boost temperature typically remains in effect.
+
+| Schedule Active At Start | Any Restored ON Schedule Applies "Now" At Finish | Temperature Outcome At Finish | Expected Key Log Line(s) |
+|---|---|---|---|
+| Yes | Yes | Scheduler remains in control; scheduler action usually overrides the pre-boost restore. | `Start boost schedule check ... schedule_active_at_start=True ...`, `Finish boost ... pre-restore temperature step: stored_temperature_applied=True`, and `Scheduler run_action completed ...` |
+| Yes | No | Pre-boost temperature typically remains in effect. | `Start boost schedule check ... schedule_active_at_start=True ...` and `Finish boost ... pre-restore temperature step: stored_temperature_applied=True` |
+| No | Yes | Scheduler remains in control; scheduler action usually overrides the pre-boost restore. | `Start boost schedule check ... schedule_active_at_start=False ...`, `Finish boost ... pre-restore temperature step: stored_temperature_applied=True`, and `Scheduler run_action completed ...` |
+| No | No | Pre-boost temperature typically remains in effect. | `Start boost schedule check ... schedule_active_at_start=False ...` and `Finish boost ... pre-restore temperature step: stored_temperature_applied=True` |
 
 - Finish callback fallback:
   - A direct callback path exists in addition to the event listener, reducing risk of missed finish handling.
@@ -217,8 +235,11 @@ If you use it, add the JS resource in Dashboard resources and configure the card
 
 ## Known Behavior
 
-- When Schedule Override is active, or no matching Scheduler switches are found for the thermostat, boost stores and restores the original thermostat target temperature.
-- Otherwise, boost end restores Scheduler switch state.
+- Boost stores a pre-boost thermostat target temperature snapshot on first start.
+- Boost end always attempts scheduler state restore when a scheduler snapshot exists.
+- Boost scheduler-path finish applies pre-boost temperature snapshot first (if present).
+- After scheduler restore, `scheduler.run_action` is called for schedules restored to ON.
+- Scheduler action may override the pre-boost temperature restore when an applicable schedule action exists.
 - For best results, use this integration with Scheduler rules that define your normal temperature behavior.
 - Changes to thermostat `min_temp`/`max_temp` are handled dynamically and the Boost Temperature slider range updates automatically.
 

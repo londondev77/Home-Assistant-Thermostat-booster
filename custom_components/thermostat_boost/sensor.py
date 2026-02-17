@@ -26,7 +26,6 @@ from homeassistant.util.unit_conversion import TemperatureConverter
 from homeassistant.util import dt as dt_util
 
 from .boost_actions import (
-    async_clear_target_temperature_snapshot,
     async_create_scheduler_scene,
     async_finish_boost_for_entry,
     async_store_target_temperature_snapshot,
@@ -44,7 +43,10 @@ from .const import (
     UNIQUE_ID_TIME_SELECTOR,
 )
 from .entity_base import ThermostatBoostEntity
-from .scheduler_utils import get_scheduler_switches_for_thermostat
+from .scheduler_utils import (
+    get_scheduler_activity_for_thermostat_now,
+    get_scheduler_switches_for_thermostat,
+)
 from .timer_manager import async_get_timer_registry
 
 _LOGGER = logging.getLogger(__name__)
@@ -346,14 +348,28 @@ async def async_start_boost_for_entry(
             hass, data[DATA_THERMOSTAT_NAME]
         )
         no_schedules_defined = not scheduler_switches
-        if schedule_override_active or no_schedules_defined:
-            await async_store_target_temperature_snapshot(
-                hass,
-                entry_id,
-                data[CONF_THERMOSTAT],
-            )
-        else:
-            await async_clear_target_temperature_snapshot(hass, entry_id)
+        activity = get_scheduler_activity_for_thermostat_now(
+            hass,
+            data[DATA_THERMOSTAT_NAME],
+        )
+        stored_temperature = await async_store_target_temperature_snapshot(
+            hass,
+            entry_id,
+            data[CONF_THERMOSTAT],
+        )
+        _LOGGER.debug(
+            "Start boost schedule check for %s: schedule_active_at_start=%s, "
+            "active_enabled_now=%s, active_disabled_now=%s, "
+            "schedule_override_active=%s, no_schedules_detected=%s, "
+            "stored_temperature_snapshot=%s",
+            entry_id,
+            activity.has_active_enabled_schedule,
+            activity.active_enabled_entities,
+            activity.active_disabled_entities,
+            schedule_override_active,
+            no_schedules_defined,
+            stored_temperature,
+        )
 
     if temperature_c is None:
         temperature_c = _get_number_value(hass, entry_id, UNIQUE_ID_BOOST_TEMPERATURE)
