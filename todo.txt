@@ -1,0 +1,35 @@
+Done but needs testing
+1.	Test when time reaches 0.
+2.	Test with multiple thermostats – seems to work
+3.	To aid testing, change time duration range to 0 to 60 mins with step 1 temporarily 
+4.	Remove debug – to be tested
+5.	Hide both sliders when boost is active
+6.	Remove clicking on entity name – prob not needed
+7.	Remove boost timer entity
+8.	Boost finish is unknown when boost isn’t active. Can it be nicer?
+9.	Add schedules
+10.	Ensure scheduler and scheduler card are added by thermostat
+11.	Start boost  turn off all schedules
+12.	End boost  turn on all schedules
+13.	Take state of schedules
+14.	Rather than turn on all schedules, restore scene
+15.	Add preset dropdowns
+16.	Start building up card using bubbles
+17.	Get the countdown working properly on the summary card
+18.	Reinstate 0 to 24 hours step 0.5
+19.	Add units to sliders
+22.	Check services – what has been created? Can we integrate timer services overall or at least hide them?
+24.	Make the temperature slider dynamic by taking the min and max settings from the thermostat?
+
+
+To do
+Test:
+1a - does the scene restore when the boost continues past a reboot
+1b - get the end boost to trigger correctly if it expires on reboot.  Ensure scene gets triggered too
+19a. Ensure thermostat is switched on. Maybe when adding integration?
+22. Add icon for integration
+23.	All rooms boost
+25. Dependencies on adding integration
+
+Don't think needed:
+20.	Countdown go blue - it's because it needs to be made active if boost is active. As it's not a timer anymore, it isn't active.
