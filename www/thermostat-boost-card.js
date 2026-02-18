@@ -7,11 +7,11 @@
   const BOOST_TIME_SUFFIX = "_boost_time_selector";
   const BOOST_ACTIVE_SUFFIX = "_boost_active";
   const BOOST_FINISH_SUFFIX = "_boost_finish";
-  const SCHEDULE_OVERRIDE_SUFFIX = "_schedule_override";
+  const SCHEDULE_OVERRIDE_SUFFIX = "_disable_schedules";
   const SCHEDULE_SWITCH_LOCK_TOOLTIP =
-    "Turning schedules on/off is disabled when either a boost is active or schedule override is on";
+    "Turning schedules on/off is disabled when either a boost is active or Disable Schedules is on";
   const SCHEDULE_OVERRIDE_LOCK_TOOLTIP =
-    "Schedule override cannot be changed when a boost is active";
+    "Disable Schedules cannot be changed when a boost is active";
   const DISABLED_TOGGLE_OPACITY = "20%";
 
   const computeLabel = (device) =>
@@ -71,7 +71,7 @@
         .stack {
           display: flex;
           flex-direction: column;
-          gap: 12px;
+          gap: 2px;
         }
         .message {
           padding: 12px;
@@ -631,7 +631,7 @@
           entities: [
             {
               entity: resolved.scheduleOverrideEntityId,
-              name: "Schedule Override",
+              name: "Disable Schedules",
               icon: "mdi:grid-off",
               tap_action: {
                 action: "none",

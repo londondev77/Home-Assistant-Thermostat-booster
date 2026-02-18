@@ -90,7 +90,7 @@ class ScheduleOverrideSwitch(ThermostatBoostEntity, SwitchEntity, RestoreEntity)
             hass,
             entry,
             data,
-            entity_name="Schedule Override",
+            entity_name="Disable Schedules",
             unique_id_suffix=UNIQUE_ID_SCHEDULE_OVERRIDE,
         )
         self._is_on = False
