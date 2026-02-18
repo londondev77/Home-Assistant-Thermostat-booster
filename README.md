@@ -75,19 +75,9 @@ The integration includes several safeguards specifically to handle restarts and 
 - The current offline-expiry path does not use the retrigger sequence; `scheduler.run_action` is used instead.
 
 - Start/finish schedule-state decision:
-  - Start boost stores a pre-boost thermostat target temperature snapshot (first start only).
-  - Finish boost (scheduler path) applies the pre-boost temperature snapshot first (if available).
-  - Finish boost then restores scheduler switch states.
-  - Finish boost then runs `scheduler.run_action` for schedules restored to ON.
-  - If a restored ON schedule has an action applicable "now", scheduler action typically overrides the pre-boost restore.
-  - If no restored ON schedule has an applicable action "now", the pre-boost temperature typically remains in effect.
-
-| Schedule Active At Start | Any Restored ON Schedule Applies "Now" At Finish | Temperature Outcome At Finish | Expected Key Log Line(s) |
-|---|---|---|---|
-| Yes | Yes | Scheduler remains in control; scheduler action usually overrides the pre-boost restore. | `Start boost schedule check ... schedule_active_at_start=True ...`, `Finish boost ... pre-restore temperature step: stored_temperature_applied=True`, and `Scheduler run_action completed ...` |
-| Yes | No | Pre-boost temperature typically remains in effect. | `Start boost schedule check ... schedule_active_at_start=True ...` and `Finish boost ... pre-restore temperature step: stored_temperature_applied=True` |
-| No | Yes | Scheduler remains in control; scheduler action usually overrides the pre-boost restore. | `Start boost schedule check ... schedule_active_at_start=False ...`, `Finish boost ... pre-restore temperature step: stored_temperature_applied=True`, and `Scheduler run_action completed ...` |
-| No | No | Pre-boost temperature typically remains in effect. | `Start boost schedule check ... schedule_active_at_start=False ...` and `Finish boost ... pre-restore temperature step: stored_temperature_applied=True` |
+  - When a boost is started, the current target temperature as well as the states of the schedules are stored.
+  - On boost finish, the stored target temperature is restored first, then the schedules are restored.
+  - Any schedules restored to `on` have their actions replayed via `scheduler.run_action`, and these schedule actions override the initial temperature restoration when applicable.
 
 - Finish callback fallback:
   - A direct callback path exists in addition to the event listener, reducing risk of missed finish handling.
@@ -245,5 +235,5 @@ If you use it, add the JS resource in Dashboard resources and configure the card
 
 ## Development Status
 
-Current integration version in `manifest.json`: `0.1.0`.
+Current integration version in `manifest.json`: `1.0.0`.
 

@@ -1,7 +1,7 @@
 {
   "domain": "thermostat_boost",
   "name": "Thermostat Boost",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "config_flow": true,
   "import_executor": true,
   "documentation": "https://github.com/REPLACE_WITH_YOUR_GITHUB/thermostat_boost",
