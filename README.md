@@ -57,7 +57,7 @@ This repository includes `www/thermostat-boost-card.js`, a custom Lovelace card 
 - display/editing schedules
 - enforces some logic by disabling elements when they shouldn't be changed
 
-If you use it, add the JS resource in Dashboard resources and configure the card with the relevant Thermostat Boost device. Add screenshots.
+If you use it, add the JS resource in Dashboard resources and configure the card with the relevant Thermostat Boost device. [Click here for instructions on how to do this](https://developers.home-assistant.io/docs/frontend/custom-ui/registering-resources).
 
 ## Dependencies
 
@@ -77,7 +77,7 @@ Notes:
 
 ## How to use
 ### Simple boost
-UI steps: (include screenshots)
+UI steps:
 1. Click on the thermostat summary card
 1. Set the boost temperature and duration
 1. Click the `Start Boost` button (this will only be shown when duration is set to a value above 0).
@@ -89,6 +89,8 @@ What happens in the background:
 1. Timer is started.
 1. Boost runs until timer expires (or until boost is cancelled manually).
 1. On finish, temperature snapshot is restored followed by scheduler snapshot (and those that are switched on will also be passed to the `scheduler.run_action` service to ensure they're enabled correctly).  The latter will override the temperature snapshot if a schedule is active at that point.
+
+Services can also be used if you don't use the dashboard card provided.  More detail can be found in the technical information section.
 
 
 ### Disable Schedules toggle (Long-Term Changes)
@@ -216,9 +218,6 @@ target:
 - Scheduler action may override the pre-boost temperature restore when an applicable schedule action exists.
 - For best results, use this integration with Scheduler rules that define your normal temperature behavior.
 - Changes to thermostat `min_temp`/`max_temp` are handled dynamically and the Boost Temperature slider range updates automatically.
-
-
-## Screenshots
 
 ## Development Status
 

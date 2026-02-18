@@ -1326,7 +1326,7 @@
     window.customCards.push({
       type: CARD_TYPE,
       name: "Thermostat Boost",
-      description: "Thermostat card with boost controls",
+      description: "Thermostat overview card and boost controls overlay",
     });
   }
 
