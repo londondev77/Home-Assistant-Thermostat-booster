@@ -15,8 +15,8 @@ start_boost:
       selector:
         duration:
           allow_negative: false
-    temperature_c:
-      name: Target Temperature (C)
+    temperature:
+      name: Target Temperature
       description: Optional. Overrides Boost Temperature slider when provided.
       example: 19.5
       selector:
@@ -24,7 +24,6 @@ start_boost:
           min: 5
           max: 30
           step: 0.5
-          unit_of_measurement: C
 
 finish_boost:
   name: Finish Boost

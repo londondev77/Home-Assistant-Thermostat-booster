@@ -14,7 +14,6 @@ from homeassistant.const import (
     STATE_ON,
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
-    UnitOfTemperature,
 )
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError
@@ -22,7 +21,6 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.util.unit_conversion import TemperatureConverter
 from homeassistant.util import dt as dt_util
 
 from .boost_actions import (
@@ -63,7 +61,7 @@ _START_BOOST_SERVICE_SCHEMA = vol.Schema(
                 vol.Optional("milliseconds", default=0): vol.Coerce(int),
             },
         ),
-        vol.Optional("temperature_c"): vol.Coerce(float),
+        vol.Optional("temperature"): vol.Coerce(float),
     },
     extra=vol.ALLOW_EXTRA,
 )
@@ -116,7 +114,7 @@ async def async_setup_entry(
                     hass,
                     entry_id,
                     time=call.data.get("time"),
-                    temperature_c=call.data.get("temperature_c"),
+                    temperature=call.data.get("temperature"),
                 )
 
         hass.services.async_register(
@@ -219,11 +217,11 @@ class BoostFinishSensor(ThermostatBoostEntity, SensorEntity, RestoreEntity):
     async def async_start_boost(
         self,
         time: dict | str | None = None,
-        temperature_c: float | None = None,
+        temperature: float | None = None,
     ) -> None:
         """Start boost: set temperature, start timer, mark active."""
         await async_start_boost_for_entry(
-            self.hass, self._entry.entry_id, time=time, temperature_c=temperature_c
+            self.hass, self._entry.entry_id, time=time, temperature=temperature
         )
 
     async def async_finish_boost(self) -> None:
@@ -310,13 +308,13 @@ async def async_start_boost_for_entry(
     entry_id: str,
     *,
     time: dict | str | None = None,
-    temperature_c: float | None = None,
+    temperature: float | None = None,
 ) -> None:
     _LOGGER.debug(
-        "Start boost started for %s (requested_time=%s, requested_temperature_c=%s)",
+        "Start boost started for %s (requested_time=%s, requested_temperature=%s)",
         entry_id,
         time,
-        temperature_c,
+        temperature,
     )
 
     data = hass.data.get(DOMAIN, {}).get(entry_id)
@@ -360,9 +358,12 @@ async def async_start_boost_for_entry(
             stored_temperature,
         )
 
-    if temperature_c is None:
-        temperature_c = _get_number_value(hass, entry_id, UNIQUE_ID_BOOST_TEMPERATURE)
-    if temperature_c is None:
+    requested_temperature = temperature
+    if requested_temperature is None:
+        requested_temperature = _get_number_value(
+            hass, entry_id, UNIQUE_ID_BOOST_TEMPERATURE
+        )
+    if requested_temperature is None:
         _LOGGER.debug(
             "Start boost aborted for %s: no boost temperature value available",
             entry_id,
@@ -377,19 +378,13 @@ async def async_start_boost_for_entry(
     else:
         duration = _parse_duration_value(time)
     _LOGGER.debug(
-        "Start boost resolved inputs for %s: temperature_c=%s, duration=%s",
+        "Start boost resolved inputs for %s: temperature=%s, duration=%s",
         entry_id,
-        temperature_c,
+        requested_temperature,
         duration,
     )
 
-    target_temp = temperature_c
-    if hass.config.units.temperature_unit != UnitOfTemperature.CELSIUS:
-        target_temp = TemperatureConverter.convert(
-            temperature_c,
-            UnitOfTemperature.CELSIUS,
-            hass.config.units.temperature_unit,
-        )
+    target_temp = requested_temperature
 
     await hass.services.async_call(
         "climate",
@@ -402,11 +397,10 @@ async def async_start_boost_for_entry(
     )
     _LOGGER.debug(
         "Start boost step complete for %s: target temperature applied "
-        "(thermostat=%s, target=%s %s)",
+        "(thermostat=%s, target=%s)",
         entry_id,
         data[CONF_THERMOSTAT],
         target_temp,
-        hass.config.units.temperature_unit,
     )
 
     await timer.async_start(duration)

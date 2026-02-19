@@ -9,7 +9,6 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.util.unit_conversion import TemperatureConverter
 
 from .const import (
     CONF_THERMOSTAT,
@@ -35,12 +34,6 @@ def _default_boost_temperature(hass: HomeAssistant, entity_id: str) -> float | N
         except (TypeError, ValueError):
             return None
 
-        if hass.config.units.temperature_unit != UnitOfTemperature.CELSIUS:
-            return TemperatureConverter.convert(
-                raw,
-                hass.config.units.temperature_unit,
-                UnitOfTemperature.CELSIUS,
-            )
         return raw
     return None
 
@@ -48,9 +41,14 @@ def _default_boost_temperature(hass: HomeAssistant, entity_id: str) -> float | N
 def _dynamic_boost_temperature_bounds(
     hass: HomeAssistant, entity_id: str
 ) -> tuple[float, float]:
-    """Derive slider bounds from thermostat attributes with safe fallbacks."""
+    """Derive slider bounds from thermostat attributes with normalized fallbacks."""
     state = hass.states.get(entity_id)
     attributes = state.attributes if state is not None else {}
+    is_us_customary = (
+        hass.config.units.temperature_unit == UnitOfTemperature.FAHRENHEIT
+    )
+    default_min_temp = 40.0 if is_us_customary else 0.0
+    default_max_temp = 80.0 if is_us_customary else 25.0
 
     def _read_bound(key: str) -> float | None:
         value = attributes.get(key)
@@ -64,15 +62,26 @@ def _dynamic_boost_temperature_bounds(
     min_temp = _read_bound("min_temp")
     max_temp = _read_bound("max_temp")
 
-    # Attribute unavailable fallbacks.
+    # Missing/invalid values normalize to 0 first.
     if min_temp is None:
         min_temp = 0.0
     if max_temp is None:
-        max_temp = 25.0
+        max_temp = 0.0
 
     # Some thermostats report both bounds as 0 when limits are not meaningful.
     if min_temp == 0.0 and max_temp == 0.0:
-        max_temp = 25.0
+        min_temp = default_min_temp
+        max_temp = default_max_temp
+
+    # If max is unavailable (normalized to 0) but min is meaningful, keep min and
+    # use a safe default max.
+    if max_temp == 0.0 and min_temp > 0.0:
+        max_temp = default_max_temp
+
+    # Guard against invalid inverted bounds from integrations.
+    if min_temp > max_temp:
+        min_temp = default_min_temp
+        max_temp = default_max_temp
 
     return min_temp, max_temp
 
@@ -128,7 +137,13 @@ class BoostTemperatureNumber(ThermostatBoostEntity, NumberEntity, RestoreEntity)
             hass, thermostat_entity_id
         )
 
-        self._attr_unit_of_measurement = "C"
+        temp_unit = (
+            "F"
+            if hass.config.units.temperature_unit == UnitOfTemperature.FAHRENHEIT
+            else "C"
+        )
+        self._attr_native_unit_of_measurement = temp_unit
+        self._attr_unit_of_measurement = temp_unit
 
     async def async_added_to_hass(self) -> None:
         """Restore state on startup."""
