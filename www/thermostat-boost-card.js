@@ -123,7 +123,7 @@
       this._resolving = null;
       this._root.innerHTML = "";
       this._root.appendChild(this._message);
-      this._setMessage("Select a boost device in the card editor.");
+      this._setMessage("Choose a thermostat to display in this card.");
       this._ensureResolved();
     }
 
@@ -1250,10 +1250,20 @@
           gap: 12px;
           padding: 4px 0;
         }
+        .editor-help {
+          color: var(--secondary-text-color);
+          font-size: 13px;
+          line-height: 1.35;
+        }
       `;
 
       this._container = document.createElement("div");
       this._container.classList.add("editor");
+
+      this._helper = document.createElement("div");
+      this._helper.classList.add("editor-help");
+      this._helper.textContent =
+        "Choose a thermostat to display in this card.";
 
       this._form = document.createElement("ha-form");
       this._form.addEventListener("value-changed", (event) => {
@@ -1263,7 +1273,7 @@
         this._valueChanged(deviceId);
       });
 
-      this._container.appendChild(this._form);
+      this._container.append(this._helper, this._form);
       this.shadowRoot.append(style, this._container);
     }
 
@@ -1283,6 +1293,7 @@
       this._form.schema = [
         {
           name: "device_id",
+          label: "Thermostat",
           selector: { device: { integration: DOMAIN } },
         },
       ];
