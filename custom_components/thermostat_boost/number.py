@@ -47,7 +47,7 @@ def _dynamic_boost_temperature_bounds(
     is_us_customary = (
         hass.config.units.temperature_unit == UnitOfTemperature.FAHRENHEIT
     )
-    default_min_temp = 40.0 if is_us_customary else 0.0
+    default_min_temp = 40.0 if is_us_customary else 5.0
     default_max_temp = 80.0 if is_us_customary else 25.0
 
     def _read_bound(key: str) -> float | None:
