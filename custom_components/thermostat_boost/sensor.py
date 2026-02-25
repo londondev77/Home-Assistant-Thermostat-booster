@@ -56,8 +56,7 @@ _LOGGER = logging.getLogger(__name__)
 
 _START_BOOST_SERVICE_SCHEMA = vol.Schema(
     {
-        vol.Optional("device_id"): vol.Any(str, [str]),
-        vol.Optional("entity_id"): vol.Any(str, [str]),
+        vol.Required("device_id"): vol.Any(str, [str]),
         vol.Optional("time"): vol.Any(
             None,
             str,
@@ -76,8 +75,7 @@ _START_BOOST_SERVICE_SCHEMA = vol.Schema(
 
 _FINISH_BOOST_SERVICE_SCHEMA = vol.Schema(
     {
-        vol.Optional("device_id"): vol.Any(str, [str]),
-        vol.Optional("entity_id"): vol.Any(str, [str]),
+        vol.Required("device_id"): vol.Any(str, [str]),
     },
     extra=vol.ALLOW_EXTRA,
 )
@@ -101,14 +99,6 @@ async def async_setup_entry(
                 if entry_id is None:
                     raise HomeAssistantError(
                         f"Unable to resolve thermostat_boost entry from device_id: {device_id}"
-                    )
-                entry_ids.add(entry_id)
-
-            for entity_id in _normalize_to_list(call.data.get("entity_id")):
-                entry_id = _entry_id_from_entity_id(hass, entity_id)
-                if entry_id is None:
-                    raise HomeAssistantError(
-                        f"Unable to resolve thermostat_boost entry from entity_id: {entity_id}"
                     )
                 entry_ids.add(entry_id)
 
@@ -138,16 +128,8 @@ async def async_setup_entry(
                     )
                 entry_ids.add(entry_id)
 
-            for entity_id in _normalize_to_list(call.data.get("entity_id")):
-                entry_id = _entry_id_from_entity_id(hass, entity_id)
-                if entry_id is None:
-                    raise HomeAssistantError(
-                        f"Unable to resolve thermostat_boost entry from entity_id: {entity_id}"
-                    )
-                entry_ids.add(entry_id)
-
             if not entry_ids:
-                raise HomeAssistantError("start_boost requires device_id or entity_id.")
+                raise HomeAssistantError("start_boost requires device_id.")
 
             for entry_id in entry_ids:
                 await async_start_boost_for_entry(
@@ -318,31 +300,6 @@ def _normalize_to_list(value) -> list[str]:
     return [str(value)]
 
 
-def _entry_id_from_unique_id(unique_id: str) -> str | None:
-    for suffix in (
-        UNIQUE_ID_BOOST_FINISH,
-        UNIQUE_ID_BOOST_ACTIVE,
-        UNIQUE_ID_BOOST_TEMPERATURE,
-        UNIQUE_ID_CALL_FOR_HEAT_ENABLED,
-        UNIQUE_ID_SCHEDULE_OVERRIDE,
-        UNIQUE_ID_TIME_SELECTOR,
-    ):
-        token = f"_{suffix}"
-        if unique_id.endswith(token):
-            return unique_id[: -len(token)]
-    return None
-
-
-@callback
-def _entry_id_from_entity_id(hass: HomeAssistant, entity_id: str) -> str | None:
-    entity_reg = er.async_get(hass)
-    reg_entry = entity_reg.async_get(entity_id)
-    if reg_entry is None:
-        return None
-    unique_id = reg_entry.unique_id or ""
-    return _entry_id_from_unique_id(unique_id)
-
-
 @callback
 def _entry_id_from_device_id(hass: HomeAssistant, device_id: str) -> str | None:
     domain_data = hass.data.get(DOMAIN, {})
@@ -364,12 +321,18 @@ def _entry_id_from_device_id(hass: HomeAssistant, device_id: str) -> str | None:
 
 
 @callback
-def _service_temperature_selector_config(hass: HomeAssistant) -> tuple[float, float, str]:
+def _service_temperature_selector_config(
+    hass: HomeAssistant,
+) -> tuple[float, float, UnitOfTemperature]:
     """Return service temperature selector bounds and unit using boost bounds logic."""
     is_us_customary = hass.config.units.temperature_unit == UnitOfTemperature.FAHRENHEIT
     default_min = 40.0 if is_us_customary else 5.0
     default_max = 80.0 if is_us_customary else 25.0
-    unit = "F" if is_us_customary else "C"
+    unit = (
+        UnitOfTemperature.FAHRENHEIT
+        if is_us_customary
+        else UnitOfTemperature.CELSIUS
+    )
 
     thermostat_entity_ids = [
         value[CONF_THERMOSTAT]

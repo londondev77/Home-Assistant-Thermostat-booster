@@ -110,7 +110,7 @@ class BoostTemperatureNumber(ThermostatBoostEntity, NumberEntity, RestoreEntity)
     _attr_native_min_value = 0.0
     _attr_native_max_value = 25.0
     _attr_native_step = 0.5
-    _attr_native_unit_of_measurement = "C"
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
 
     def __init__(
         self,
@@ -138,9 +138,9 @@ class BoostTemperatureNumber(ThermostatBoostEntity, NumberEntity, RestoreEntity)
         )
 
         temp_unit = (
-            "F"
+            UnitOfTemperature.FAHRENHEIT
             if hass.config.units.temperature_unit == UnitOfTemperature.FAHRENHEIT
-            else "C"
+            else UnitOfTemperature.CELSIUS
         )
         self._attr_native_unit_of_measurement = temp_unit
         self._attr_unit_of_measurement = temp_unit
