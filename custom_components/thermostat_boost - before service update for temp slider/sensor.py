@@ -14,28 +14,20 @@ from homeassistant.const import (
     STATE_ON,
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
-    UnitOfTemperature,
 )
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util import dt as dt_util
-
-try:
-    from homeassistant.helpers.service import async_set_service_schema
-except ImportError:  # pragma: no cover - compatibility guard for older HA cores
-    async_set_service_schema = None
 
 from .boost_actions import (
     async_create_scheduler_scene,
     async_finish_boost_for_entry,
     async_store_target_temperature_snapshot,
 )
-from .number import _dynamic_boost_temperature_bounds
 from .const import (
     CONF_THERMOSTAT,
     DATA_THERMOSTAT_NAME,
@@ -133,21 +125,6 @@ async def async_setup_entry(
             schema=_START_BOOST_SERVICE_SCHEMA,
         )
         hass.data[DOMAIN][start_boost_service_key] = True
-
-    if hass.services.has_service(DOMAIN, SERVICE_START_BOOST):
-        _async_update_start_boost_service_schema(hass)
-
-    @callback
-    def _async_handle_thermostat_state_change(_event) -> None:
-        _async_update_start_boost_service_schema(hass)
-
-    entry.async_on_unload(
-        async_track_state_change_event(
-            hass,
-            [data[CONF_THERMOSTAT]],
-            _async_handle_thermostat_state_change,
-        )
-    )
 
 
 class BoostFinishSensor(ThermostatBoostEntity, SensorEntity, RestoreEntity):
@@ -328,98 +305,6 @@ def _entry_id_from_device_id(hass: HomeAssistant, device_id: str) -> str | None:
     return None
 
 
-@callback
-def _service_temperature_selector_config(hass: HomeAssistant) -> tuple[float, float, str]:
-    """Return service temperature selector bounds and unit using boost bounds logic."""
-    is_us_customary = hass.config.units.temperature_unit == UnitOfTemperature.FAHRENHEIT
-    default_min = 40.0 if is_us_customary else 5.0
-    default_max = 80.0 if is_us_customary else 25.0
-    unit = "F" if is_us_customary else "C"
-
-    thermostat_entity_ids = [
-        value[CONF_THERMOSTAT]
-        for value in hass.data.get(DOMAIN, {}).values()
-        if isinstance(value, dict) and CONF_THERMOSTAT in value
-    ]
-    if not thermostat_entity_ids:
-        return default_min, default_max, unit
-
-    mins: list[float] = []
-    maxs: list[float] = []
-    for thermostat_entity_id in thermostat_entity_ids:
-        min_temp, max_temp = _dynamic_boost_temperature_bounds(hass, thermostat_entity_id)
-        mins.append(min_temp)
-        maxs.append(max_temp)
-
-    min_temp = min(mins) if mins else default_min
-    max_temp = max(maxs) if maxs else default_max
-    if min_temp > max_temp:
-        return default_min, default_max, unit
-    return min_temp, max_temp, unit
-
-
-@callback
-def _async_update_start_boost_service_schema(hass: HomeAssistant) -> None:
-    """Update start_boost service schema with dynamic temperature selector metadata."""
-    if async_set_service_schema is None:
-        return
-
-    min_temp, max_temp, unit = _service_temperature_selector_config(hass)
-    async_set_service_schema(
-        hass,
-        DOMAIN,
-        SERVICE_START_BOOST,
-        {
-            "name": "Start Boost",
-            "description": (
-                "Set thermostat temperature, start boost timer, and mark boost active."
-            ),
-            "fields": {
-                "device_id": {
-                    "name": "Device",
-                    "description": "Thermostat Boost device to start.",
-                    "required": True,
-                    "selector": {
-                        "device": {
-                            "integration": DOMAIN,
-                            "entity": {"domain": "sensor"},
-                        }
-                    },
-                },
-                "time": {
-                    "name": "Time",
-                    "description": (
-                        "Optional. Overrides Boost Time Selector when provided. Uses "
-                        "duration selector values (days/hours/minutes/seconds). Cannot "
-                        "be zero."
-                    ),
-                    "selector": {
-                        "duration": {"allow_negative": False},
-                    },
-                },
-                "temperature": {
-                    "name": "Target Temperature",
-                    "description": (
-                        "Optional. Overrides Boost Temperature slider when provided. "
-                        "The range available on the slider is derived from all configured thermostats and not just the one you've selected above; the value is "
-                        "clamped to the selected thermostat's bounds when you run the action in case you select a temperature that is outside of its configured range."
-                    ),
-                    "example": 19.5,
-                    "selector": {
-                        "number": {
-                            "min": min_temp,
-                            "max": max_temp,
-                            "step": 0.5,
-                            "mode": "slider",
-                            "unit_of_measurement": unit,
-                        }
-                    },
-                },
-            },
-        },
-    )
-
-
 async def async_start_boost_for_entry(
     hass: HomeAssistant,
     entry_id: str,
@@ -501,20 +386,7 @@ async def async_start_boost_for_entry(
         duration,
     )
 
-    target_temp = float(requested_temperature)
-    min_temp, max_temp = _dynamic_boost_temperature_bounds(hass, data[CONF_THERMOSTAT])
-    bounded_target_temp = max(min_temp, min(max_temp, target_temp))
-    if bounded_target_temp != target_temp:
-        _LOGGER.debug(
-            "Start boost requested temperature clamped for %s: requested=%s, "
-            "applied=%s, bounds=%s..%s",
-            entry_id,
-            target_temp,
-            bounded_target_temp,
-            min_temp,
-            max_temp,
-        )
-    target_temp = bounded_target_temp
+    target_temp = requested_temperature
 
     await hass.services.async_call(
         "climate",
