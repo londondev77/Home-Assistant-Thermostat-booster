@@ -14,6 +14,7 @@
   const SCHEDULE_OVERRIDE_LOCK_TOOLTIP =
     "Disable Schedules cannot be changed when a boost is active";
   const DISABLED_TOGGLE_OPACITY = "20%";
+  const SLIDER_STATE_MIN_WIDTH = "8ch";
 
   const computeLabel = (device) =>
     device?.name_by_user || device?.name || device?.id || "Thermostat Boost";
@@ -133,6 +134,7 @@
       if (this._bubbleHeaderCard) this._bubbleHeaderCard.hass = hass;
       if (this._mainStack) this._mainStack.hass = hass;
       this._applySchedulerLockState();
+      this._applySliderStateStyles();
       this._ensureResolved();
     }
 
@@ -205,6 +207,7 @@
       if (!device) return null;
 
       return {
+        deviceId: deviceId,
         label: computeLabel(device),
         thermostatEntityId: findThermostatEntityId(device),
         boostTemperatureEntityId: findEntityId(
@@ -558,14 +561,14 @@
                   action: "call-service",
                   service: `${DOMAIN}.finish_boost`,
                   service_data: {
-                    entity_id: resolved.boostFinishEntityId,
+                    device_id: resolved.deviceId,
                   },
                 },
                 icon_tap_action: {
                   action: "call-service",
                   service: `${DOMAIN}.finish_boost`,
                   service_data: {
-                    entity_id: resolved.boostFinishEntityId,
+                    device_id: resolved.deviceId,
                   },
                 },
                 color: "red",
@@ -614,14 +617,14 @@
                   action: "call-service",
                   service: `${DOMAIN}.start_boost`,
                   service_data: {
-                    entity_id: resolved.boostFinishEntityId,
+                    device_id: resolved.deviceId,
                   },
                 },
                 icon_tap_action: {
                   action: "call-service",
                   service: `${DOMAIN}.start_boost`,
                   service_data: {
-                    entity_id: resolved.boostFinishEntityId,
+                    device_id: resolved.deviceId,
                   },
                 },
               },
@@ -895,15 +898,51 @@
 
     _scheduleSchedulerLockRefresh() {
       this._applySchedulerLockState();
+      this._applySliderStateStyles();
       if (this._schedulerLockRefreshTimer) {
         clearTimeout(this._schedulerLockRefreshTimer);
       }
       // Re-apply a few times because scheduler-card internals can mount asynchronously.
       this._schedulerLockRefreshTimer = setTimeout(() => {
         this._applySchedulerLockState();
+        this._applySliderStateStyles();
       }, 100);
-      setTimeout(() => this._applySchedulerLockState(), 300);
-      setTimeout(() => this._applySchedulerLockState(), 800);
+      setTimeout(() => {
+        this._applySchedulerLockState();
+        this._applySliderStateStyles();
+      }, 300);
+      setTimeout(() => {
+        this._applySchedulerLockState();
+        this._applySliderStateStyles();
+      }, 800);
+    }
+
+    _applySliderStateStyles() {
+      const targetEntities = [
+        this._resolved?.boostTemperatureEntityId,
+        this._resolved?.boostTimeEntityId,
+      ].filter(Boolean);
+      if (targetEntities.length === 0) return;
+
+      const candidates = this._queryDeepAll(".state, .value");
+      for (const node of candidates) {
+        if (!node?.style) continue;
+        const path = [];
+        let current = node;
+        while (current) {
+          path.push(current);
+          current = current.parentNode || current.host || null;
+        }
+        const inTargetSlider = targetEntities.some((entityId) =>
+          this._pathContainsEntity(path, entityId)
+        );
+        if (!inTargetSlider) continue;
+
+        node.style.whiteSpace = "nowrap";
+        node.style.minWidth = SLIDER_STATE_MIN_WIDTH;
+        node.style.textAlign = "right";
+        node.style.display = "inline-block";
+      }
     }
 
     _applySchedulerLockState() {
