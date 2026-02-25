@@ -19,6 +19,7 @@ from .const import (
     DATA_THERMOSTAT_NAME,
     DOMAIN,
     UNIQUE_ID_BOOST_ACTIVE,
+    UNIQUE_ID_CALL_FOR_HEAT_ENABLED,
     UNIQUE_ID_SCHEDULE_OVERRIDE,
 )
 from .entity_base import ThermostatBoostEntity
@@ -35,6 +36,7 @@ async def async_setup_entry(
         [
             BoostActiveSwitch(hass, entry, data),
             ScheduleOverrideSwitch(hass, entry, data),
+            CallForHeatEnabledSwitch(hass, entry, data),
         ]
     )
 
@@ -42,7 +44,7 @@ async def async_setup_entry(
 class BoostActiveSwitch(ThermostatBoostEntity, SwitchEntity, RestoreEntity):
     """Switch indicating whether a boost session is active."""
 
-    _attr_icon = "mdi:fire"
+    _attr_icon = "mdi:rocket-launch"
 
     def __init__(
         self, hass: HomeAssistant, entry: ConfigEntry, data: dict
@@ -140,6 +142,45 @@ class ScheduleOverrideSwitch(ThermostatBoostEntity, SwitchEntity, RestoreEntity)
 
         if not _is_switch_on(self.hass, self._entry.entry_id, UNIQUE_ID_BOOST_ACTIVE):
             await async_restore_scheduler_snapshot(self.hass, self._entry.entry_id)
+
+
+class CallForHeatEnabledSwitch(ThermostatBoostEntity, SwitchEntity, RestoreEntity):
+    """Switch controlling inclusion in aggregate call-for-heat signal."""
+
+    _attr_icon = "mdi:broadcast"
+
+    def __init__(
+        self, hass: HomeAssistant, entry: ConfigEntry, data: dict
+    ) -> None:
+        super().__init__(
+            hass,
+            entry,
+            data,
+            entity_name="Call for Heat enabled",
+            unique_id_suffix=UNIQUE_ID_CALL_FOR_HEAT_ENABLED,
+        )
+        self._is_on = False
+
+    async def async_added_to_hass(self) -> None:
+        """Restore state on startup."""
+        await super().async_added_to_hass()
+        if (state := await self.async_get_last_state()) is not None:
+            self._is_on = state.state == STATE_ON
+
+    @property
+    def is_on(self) -> bool:
+        """Return true if the switch is on."""
+        return self._is_on
+
+    async def async_turn_on(self, **kwargs) -> None:
+        """Turn the switch on."""
+        self._is_on = True
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs) -> None:
+        """Turn the switch off."""
+        self._is_on = False
+        self.async_write_ha_state()
 
 
 @callback

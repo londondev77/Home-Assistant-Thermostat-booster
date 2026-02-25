@@ -11,7 +11,13 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.selector import selector
 
-from .const import CONF_THERMOSTAT, DOMAIN
+from .const import (
+    CONF_ENTRY_TYPE,
+    CONF_THERMOSTAT,
+    DOMAIN,
+    ENTRY_TYPE_AGGREGATE,
+    ENTRY_TYPE_THERMOSTAT,
+)
 
 
 def _climate_entity_ids(hass: HomeAssistant) -> list[str]:
@@ -67,14 +73,17 @@ class ThermostatBoostConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if CONF_THERMOSTAT in entry.data
         }
 
+    @callback
+    def _aggregate_entry_exists(self) -> bool:
+        return any(
+            entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_AGGREGATE
+            for entry in self._async_current_entries()
+        )
+
     async def async_step_user(self, user_input: dict | None = None):
         """Handle the initial step."""
         if user_input is not None:
-            thermostat = user_input[CONF_THERMOSTAT]
-            await self.async_set_unique_id(thermostat)
-            self._abort_if_unique_id_configured()
-            title = _friendly_name(self.hass, thermostat)
-            return self.async_create_entry(title=title, data=user_input)
+            return await self.async_step_thermostat(user_input)
 
         options = _available_thermostats(self.hass, self._configured_thermostats())
         if not options:
@@ -92,5 +101,33 @@ class ThermostatBoostConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             }
         )
-
         return self.async_show_form(step_id="user", data_schema=data_schema)
+
+    async def async_step_thermostat(self, user_input: dict | None = None):
+        """Create a thermostat entry."""
+        if user_input is None:
+            return self.async_abort(reason="no_thermostats")
+
+        thermostat = user_input[CONF_THERMOSTAT]
+        await self.async_set_unique_id(thermostat)
+        self._abort_if_unique_id_configured()
+        title = _friendly_name(self.hass, thermostat)
+        return self.async_create_entry(
+            title=title,
+            data={
+                CONF_ENTRY_TYPE: ENTRY_TYPE_THERMOSTAT,
+                CONF_THERMOSTAT: thermostat,
+            },
+        )
+
+    async def async_step_aggregate_auto(self, user_input: dict | None = None):
+        """Create the aggregate call-for-heat entry automatically."""
+        if self._aggregate_entry_exists():
+            return self.async_abort(reason="aggregate_already_configured")
+
+        await self.async_set_unique_id(ENTRY_TYPE_AGGREGATE)
+        self._abort_if_unique_id_configured()
+        return self.async_create_entry(
+            title="Aggregate Call for Heat",
+            data={CONF_ENTRY_TYPE: ENTRY_TYPE_AGGREGATE},
+        )

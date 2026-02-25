@@ -11,7 +11,8 @@
       }
     },
     "abort": {
-      "no_thermostats": "No thermostats were found."
+      "no_thermostats": "No thermostats were found.",
+      "aggregate_already_configured": "Aggregate Call for Heat is already configured."
     }
   }
 }

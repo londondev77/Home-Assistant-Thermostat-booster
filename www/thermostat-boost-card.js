@@ -7,6 +7,7 @@
   const BOOST_TIME_SUFFIX = "_boost_time_selector";
   const BOOST_ACTIVE_SUFFIX = "_boost_active";
   const BOOST_FINISH_SUFFIX = "_boost_finish";
+  const CALL_FOR_HEAT_ENABLED_SUFFIX = "_call_for_heat_enabled";
   const SCHEDULE_OVERRIDE_SUFFIX = "_disable_schedules";
   const SCHEDULE_SWITCH_LOCK_TOOLTIP =
     "Turning schedules on/off is disabled when either a boost is active or Disable Schedules is on";
@@ -225,6 +226,11 @@
           entityList,
           deviceId,
           BOOST_FINISH_SUFFIX
+        ),
+        callForHeatEnabledEntityId: findEntityId(
+          entityList,
+          deviceId,
+          CALL_FOR_HEAT_ENABLED_SUFFIX
         ),
         scheduleOverrideEntityId: findEntityId(
           entityList,
@@ -624,23 +630,39 @@
         });
       }
 
-      if (resolved.scheduleOverrideEntityId) {
+      if (resolved.callForHeatEnabledEntityId || resolved.scheduleOverrideEntityId) {
+        const entities = [];
+        if (resolved.callForHeatEnabledEntityId) {
+          entities.push({
+            entity: resolved.callForHeatEnabledEntityId,
+            name: "Call for Heat enabled",
+            icon: "mdi:fire",
+            tap_action: {
+              action: "none",
+            },
+            hold_action: {
+              action: "none",
+            },
+          });
+        }
+        if (resolved.scheduleOverrideEntityId) {
+          entities.push({
+            entity: resolved.scheduleOverrideEntityId,
+            name: "Disable Schedules",
+            icon: "mdi:grid-off",
+            tap_action: {
+              action: "none",
+            },
+            hold_action: {
+              action: "none",
+            },
+          });
+        }
+
         cards.push({
           type: "entities",
           show_header_toggle: false,
-          entities: [
-            {
-              entity: resolved.scheduleOverrideEntityId,
-              name: "Disable Schedules",
-              icon: "mdi:grid-off",
-              tap_action: {
-                action: "none",
-              },
-              hold_action: {
-                action: "none",
-              },
-            },
-          ],
+          entities,
         });
       }
 
