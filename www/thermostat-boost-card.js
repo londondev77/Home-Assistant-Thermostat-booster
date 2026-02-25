@@ -1316,7 +1316,12 @@
         {
           name: "device_id",
           label: "Thermostat",
-          selector: { device: { integration: DOMAIN } },
+          selector: {
+            device: {
+              integration: DOMAIN,
+              entity: { domain: "sensor" },
+            },
+          },
         },
       ];
       this._form.data = {

@@ -30,7 +30,14 @@ start_boost:
 finish_boost:
   name: Finish Boost
   description: End the boost, reset thermostat temperature, and mark boost inactive.
-  target:
-    entity:
-      integration: thermostat_boost
-      domain: sensor
+  fields:
+    device_id:
+      name: Device
+      description: Thermostat Boost device(s) to finish.
+      required: true
+      selector:
+        device:
+          integration: thermostat_boost
+          entity:
+            domain: sensor
+          multiple: true
