@@ -115,11 +115,18 @@
     }
 
     static getStubConfig() {
-      return { type: `custom:${CARD_TYPE}` };
+      return {
+        type: `custom:${CARD_TYPE}`,
+        use_scheduler_component_card: true,
+      };
     }
 
     setConfig(config) {
-      this._config = { type: `custom:${CARD_TYPE}`, ...(config || {}) };
+      this._config = {
+        type: `custom:${CARD_TYPE}`,
+        use_scheduler_component_card: true,
+        ...(config || {}),
+      };
       window.__thermostatBoostCardLastConfig = this._config;
       this._resolved = null;
       this._resolving = null;
@@ -255,7 +262,11 @@
         .replace(/[^a-z0-9]+/g, "_")
         .replace(/^_+|_+$/g, "");
       const navAnchor = navSlug ? `#${navSlug}_detail` : "#detail";
-      const hasScheduleOverrideButton = Boolean(resolved.scheduleOverrideEntityId);
+      const useSchedulerComponentCard =
+        this._config?.use_scheduler_component_card !== false;
+      const showInlinePopupPreview = this._isInCardEditorPreview();
+      const hasScheduleOverrideButton =
+        useSchedulerComponentCard && Boolean(resolved.scheduleOverrideEntityId);
       const countdownSubButtonClass = hasScheduleOverrideButton
         ? ".bubble-sub-button-2"
         : ".bubble-sub-button-1";
@@ -432,37 +443,46 @@
         slider_value_position: "right",
       };
 
-      cards.push({
-        type: "custom:bubble-card",
-        card_type: "pop-up",
-        hash: navAnchor,
-        name: resolved.label || "Thermostat",
-        icon: "mdi:home-thermometer",
-        show_header: true,
-        button_type: "name",
-        sub_button: {
-          main: [],
-          bottom: [],
-        },
-        styles: `
-          \${(() => {
-            const thermostatState = hass.states['${resolved.thermostatEntityId}'];
-            const thermostatIcon = thermostatState?.attributes?.icon || 'mdi:home-thermometer';
-            const headerIcon =
-              card.querySelector('.bubble-header .bubble-icon ha-icon') ||
-              card.querySelector('.bubble-header .bubble-icon');
-            if (!headerIcon) return '';
-            if ('icon' in headerIcon) {
-              headerIcon.icon = thermostatIcon;
-            } else {
-              headerIcon.setAttribute('icon', thermostatIcon);
-            }
-            return '';
-          })()}
-        `,
-        slider_fill_orientation: "left",
-        slider_value_position: "right",
-      });
+      if (!showInlinePopupPreview) {
+        cards.push({
+          type: "custom:bubble-card",
+          card_type: "pop-up",
+          hash: navAnchor,
+          name: resolved.label || "Thermostat",
+          icon: "mdi:home-thermometer",
+          show_header: true,
+          button_type: "name",
+          sub_button: {
+            main: [],
+            bottom: [],
+          },
+          styles: `
+            \${(() => {
+              const thermostatState = hass.states['${resolved.thermostatEntityId}'];
+              const thermostatIcon = thermostatState?.attributes?.icon || 'mdi:home-thermometer';
+              const headerIcon =
+                card.querySelector('.bubble-header .bubble-icon ha-icon') ||
+                card.querySelector('.bubble-header .bubble-icon');
+              if (!headerIcon) return '';
+              if ('icon' in headerIcon) {
+                headerIcon.icon = thermostatIcon;
+              } else {
+                headerIcon.setAttribute('icon', thermostatIcon);
+              }
+              return '';
+            })()}
+          `,
+          slider_fill_orientation: "left",
+          slider_value_position: "right",
+        });
+      } else {
+        cards.push({
+          type: "heading",
+          icon: "mdi:card-text-outline",
+          heading_style: "title",
+          heading: "Popup preview",
+        });
+      }
 
       cards.push({
         type: "thermostat",
@@ -637,7 +657,10 @@
         });
       }
 
-      if (resolved.callForHeatEnabledEntityId || resolved.scheduleOverrideEntityId) {
+      if (
+        resolved.callForHeatEnabledEntityId ||
+        (useSchedulerComponentCard && resolved.scheduleOverrideEntityId)
+      ) {
         const entities = [];
         if (resolved.callForHeatEnabledEntityId) {
           entities.push({
@@ -652,7 +675,7 @@
             },
           });
         }
-        if (resolved.scheduleOverrideEntityId) {
+        if (useSchedulerComponentCard && resolved.scheduleOverrideEntityId) {
           entities.push({
             entity: resolved.scheduleOverrideEntityId,
             name: "Disable Schedules",
@@ -673,11 +696,9 @@
         });
       }
 
-      if (resolved.thermostatEntityId) {
-        const thermostatName = resolved.label || resolved.thermostatEntityId;
+      if (useSchedulerComponentCard && resolved.thermostatEntityId) {
         cards.push({
           type: "custom:scheduler-card",
-          tags: [thermostatName],
           include: [resolved.thermostatEntityId],
           display_options: {
             primary_info: "{entity}",
@@ -743,7 +764,33 @@
       return this._hass.states?.[entityId]?.state === "on";
     }
 
+    _isInCardEditorPreview() {
+      const editorTags = new Set([
+        "hui-dialog-create-card",
+        "hui-dialog-edit-card",
+        "hui-dialog-edit-dashboard-card",
+        "hui-dialog-create",
+        "hui-card-picker",
+        "hui-card-preview",
+        "hui-card-element-editor",
+      ]);
+      let node = this;
+      while (node) {
+        const tag = node?.tagName?.toLowerCase?.();
+        if (tag && editorTags.has(tag)) {
+          return true;
+        }
+        node = node.parentNode || node.host || null;
+      }
+      return false;
+    }
+
+    _useSchedulerComponentCard() {
+      return this._config?.use_scheduler_component_card !== false;
+    }
+
     _isSchedulerSwitchLockActive() {
+      if (!this._useSchedulerComponentCard()) return false;
       return this._isBoostActive() || this._isScheduleOverrideOn();
     }
 
@@ -771,11 +818,13 @@
     }
 
     _handleSchedulerLockEvent(ev) {
+      if (!this._useSchedulerComponentCard()) return;
       this._noteScheduleOverrideIntent(ev);
       this._handleSchedulerLockClick(ev);
     }
 
     _noteScheduleOverrideIntent(ev) {
+      if (!this._useSchedulerComponentCard()) return;
       const entityId = this._resolved?.scheduleOverrideEntityId;
       if (!entityId || !this._hass) return;
       if (this._hass.states?.[entityId]?.state === "on") {
@@ -792,6 +841,7 @@
     }
 
     _handleSchedulerLockClick(ev) {
+      if (!this._useSchedulerComponentCard()) return;
       const path = typeof ev.composedPath === "function" ? ev.composedPath() : [];
       const toggleSelector =
         "ha-switch, mwc-switch, .switch, [role='switch'], input[type='checkbox']";
@@ -854,6 +904,10 @@
     }
 
     _handleSchedulerLockHover(ev) {
+      if (!this._useSchedulerComponentCard()) {
+        this.style.cursor = "";
+        return;
+      }
       const toggleSelector =
         "ha-switch, mwc-switch, .switch, [role='switch'], input[type='checkbox']";
       const path = typeof ev.composedPath === "function" ? ev.composedPath() : [];
@@ -901,6 +955,15 @@
     }
 
     _scheduleSchedulerLockRefresh() {
+      if (!this._useSchedulerComponentCard()) {
+        this.style.cursor = "";
+        if (this._schedulerLockRefreshTimer) {
+          clearTimeout(this._schedulerLockRefreshTimer);
+          this._schedulerLockRefreshTimer = null;
+        }
+        this._applySliderStateStyles();
+        return;
+      }
       this._applySchedulerLockState();
       this._applySliderStateStyles();
       if (this._schedulerLockRefreshTimer) {
@@ -950,6 +1013,10 @@
     }
 
     _applySchedulerLockState() {
+      if (!this._useSchedulerComponentCard()) {
+        this.style.cursor = "";
+        return;
+      }
       const schedulerCards = this._queryDeepAll("scheduler-card");
       const lock = this._isSchedulerSwitchLockActive();
       for (const schedulerCard of schedulerCards) {
@@ -1306,6 +1373,7 @@
       this.attachShadow({ mode: "open" });
       this._config = null;
       this._hass = null;
+      this._schedulerWarningToken = 0;
 
       const style = document.createElement("style");
       style.textContent = `
@@ -1320,6 +1388,16 @@
           font-size: 13px;
           line-height: 1.35;
         }
+        .editor-warning {
+          display: none;
+          padding: 10px 12px;
+          border-radius: 8px;
+          border: 1px solid var(--warning-color, #f4b400);
+          background: var(--warning-bg-color, rgba(244, 180, 0, 0.12));
+          color: var(--primary-text-color);
+          font-size: 13px;
+          line-height: 1.35;
+        }
       `;
 
       this._container = document.createElement("div");
@@ -1330,20 +1408,26 @@
       this._helper.textContent =
         "Choose a thermostat to display in this card.";
 
+      this._warning = document.createElement("div");
+      this._warning.classList.add("editor-warning");
+
       this._form = document.createElement("ha-form");
       this._form.addEventListener("value-changed", (event) => {
         const value = event.detail?.value;
-        if (!value) return;
-        const deviceId = value.device_id || value;
-        this._valueChanged(deviceId);
+        if (value === undefined || value === null) return;
+        this._valueChanged(value);
       });
 
-      this._container.append(this._helper, this._form);
+      this._container.append(this._helper, this._form, this._warning);
       this.shadowRoot.append(style, this._container);
     }
 
     setConfig(config) {
-      this._config = { type: `custom:${CARD_TYPE}`, ...(config || {}) };
+      this._config = {
+        type: `custom:${CARD_TYPE}`,
+        use_scheduler_component_card: true,
+        ...(config || {}),
+      };
       this._renderForm();
     }
 
@@ -1355,10 +1439,16 @@
     _renderForm() {
       if (!this._form || !this._hass) return;
       this._form.hass = this._hass;
+      this._form.computeLabel = (schema) => {
+        if (schema?.name === "device_id") return "Thermostat";
+        if (schema?.name === "use_scheduler_component_card") {
+          return "Include Scheduler card";
+        }
+        return schema?.label || schema?.name || "";
+      };
       this._form.schema = [
         {
           name: "device_id",
-          label: "Thermostat",
           selector: {
             device: {
               integration: DOMAIN,
@@ -1366,18 +1456,53 @@
             },
           },
         },
+        {
+          name: "use_scheduler_component_card",
+          selector: {
+            boolean: {},
+          },
+        },
       ];
       this._form.data = {
         device_id: this._config?.device_id || "",
+        use_scheduler_component_card:
+          this._config?.use_scheduler_component_card !== false,
       };
+      this._updateSchedulerWarning();
     }
 
     _valueChanged(value) {
-      if (!value) return;
-      if (!this._config) this._config = { type: `custom:${CARD_TYPE}` };
-      if (value === this._config.device_id) return;
-      const next = { ...this._config, device_id: value };
+      if (value === undefined || value === null) return;
+      if (!this._config) {
+        this._config = {
+          type: `custom:${CARD_TYPE}`,
+          use_scheduler_component_card: true,
+        };
+      }
+      const next = { ...this._config };
+
+      if (typeof value === "object" && !Array.isArray(value)) {
+        if ("device_id" in value) {
+          next.device_id = value.device_id;
+        }
+        if ("use_scheduler_component_card" in value) {
+          next.use_scheduler_component_card = Boolean(
+            value.use_scheduler_component_card
+          );
+        }
+      } else if (typeof value === "string") {
+        next.device_id = value;
+      } else if (typeof value === "boolean") {
+        next.use_scheduler_component_card = value;
+      } else {
+        return;
+      }
+
+      if (next.use_scheduler_component_card === undefined) {
+        next.use_scheduler_component_card = true;
+      }
       delete next.entity_id;
+      if (JSON.stringify(next) === JSON.stringify(this._config)) return;
       this._config = next;
       this.dispatchEvent(
         new CustomEvent("config-changed", {
@@ -1386,6 +1511,102 @@
           composed: true,
         })
       );
+      this._updateSchedulerWarning();
+    }
+
+    async _updateSchedulerWarning() {
+      if (!this._warning) return;
+      const deviceId = this._config?.device_id;
+      const useSchedulerComponentCard =
+        this._config?.use_scheduler_component_card !== false;
+      if (!this._hass || !deviceId || useSchedulerComponentCard) {
+        this._warning.style.display = "none";
+        this._warning.textContent = "";
+        return;
+      }
+
+      const token = ++this._schedulerWarningToken;
+      try {
+        const hasSchedules = await this._deviceHasAssignedSchedules(deviceId);
+        if (token !== this._schedulerWarningToken) return;
+        if (hasSchedules === true) {
+          this._warning.textContent =
+            "The thermostat you're adding has schedules assigned to it. It is strongly recommended to include the Scheduler card to avoid confusion.";
+          this._warning.style.display = "block";
+          return;
+        }
+        if (hasSchedules === false) {
+          this._warning.style.display = "none";
+          this._warning.textContent = "";
+        }
+      } catch (_err) {
+        // Keep silent in editor, but clear stale text if detection hard-fails.
+        this._warning.style.display = "none";
+        this._warning.textContent = "";
+      }
+    }
+
+    async _deviceHasAssignedSchedules(deviceId) {
+      const devices = await this._hass.callWS({
+        type: "config/device_registry/list",
+      });
+
+      const device = devices.find((entry) => entry.id === deviceId);
+      if (!device) return false;
+      const thermostatEntityId = findThermostatEntityId(device);
+      if (!thermostatEntityId) return false;
+      const thermostatName =
+        this._hass.states?.[thermostatEntityId]?.attributes?.friendly_name || "";
+      const thermostatNameLower =
+        typeof thermostatName === "string" ? thermostatName.toLowerCase() : "";
+
+      const matchesAssignedEntities = (assigned) => {
+        if (typeof assigned === "string") {
+          return assigned === thermostatEntityId;
+        }
+        if (Array.isArray(assigned)) {
+          return assigned.some(
+            (entityId) =>
+              typeof entityId === "string" && entityId === thermostatEntityId
+          );
+        }
+        return false;
+      };
+
+      const matchesTags = (tags) => {
+        if (!thermostatNameLower) return false;
+        if (typeof tags === "string") {
+          return tags.toLowerCase().includes(thermostatNameLower);
+        }
+        if (Array.isArray(tags)) {
+          return tags.some(
+            (tag) =>
+              typeof tag === "string" &&
+              tag.toLowerCase().includes(thermostatNameLower)
+          );
+        }
+        return false;
+      };
+
+      let inspectedSchedulerAssignments = false;
+      for (const [entityId, state] of Object.entries(this._hass.states || {})) {
+        if (!entityId.startsWith("switch.")) continue;
+        const attrs = state?.attributes || {};
+        const assigned = attrs.entities;
+        const hasAssignmentData = assigned !== undefined && assigned !== null;
+        const hasTagData = attrs.tags !== undefined && attrs.tags !== null;
+        if (!hasAssignmentData && !hasTagData) continue;
+        inspectedSchedulerAssignments = true;
+
+        if (matchesAssignedEntities(assigned)) {
+          return true;
+        }
+        if (matchesTags(attrs.tags)) {
+          return true;
+        }
+      }
+      // Null indicates scheduler assignment data could not be read reliably.
+      return inspectedSchedulerAssignments ? false : null;
     }
   }
 

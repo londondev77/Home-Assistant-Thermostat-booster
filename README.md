@@ -94,6 +94,13 @@ If you use it, add the JS resource in Dashboard resources and configure the card
 1. Select the device to add. *Only thermostats you've added to the integration will appear in this list*.
 1. Click save.
 
+### Card configuration option
+
+- `Include Scheduler card` (default: enabled):
+  - When enabled, the card shows the embedded Scheduler card and the `Disable Schedules` switch.
+  - When disabled, both the embedded Scheduler card and `Disable Schedules` switch are hidden.
+  - If the selected thermostat already has schedules assigned and this option is disabled, the editor shows a warning recommending that Scheduler card is included to avoid confusion.
+
 ## Dependencies
 
 The integration backend itself has no external Python package requirements in `manifest.json`, but the full feature set depends on these Home Assistant add-ons/custom cards:
@@ -119,7 +126,7 @@ UI steps:
 
 What happens in the background:
 1. The current target temperature of the thermostat is snapshotted.
-1. Matching scheduler switches are snapshotted and turned off.  This is done so they don't override the boost.
+1. Matching scheduler switches are snapshotted and turned off. Matching is based on scheduler switches whose `entities` include the boosted thermostat entity ID. This is done so they don't override the boost.
 1. Thermostat target temperature is changed to match selected boost temperature.
 1. Timer is started.
 1. Boost runs until timer expires (or until boost is cancelled manually).
@@ -149,6 +156,7 @@ The integration includes several safeguards:
   - Before disabling schedules, current Scheduler switch states are stored.
   - Stored snapshot is used to restore the exact previous on/off states at boost end.
   - Turning these schedules back on should always immediately set the thermostat to the prevailing schedule (and this is what I found in my old automation method).  However I found this wasn't always reliable so when the schedules are turned back on, `scheduler.run_action` is also executed to force the schedule. This appears to work well but needs further testing.
+  - Caveat: if a single scheduler switch controls multiple thermostats, boosting one thermostat will still toggle that shared scheduler switch and can therefore affect the other thermostats on that schedule.
 
 - Retry when entities are unavailable:
   - If scheduler entities are `unknown`/`unavailable` during restore, restore is deferred and retried.
