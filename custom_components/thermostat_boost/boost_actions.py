@@ -161,15 +161,17 @@ async def _async_run_scheduler_actions(
 
 
 async def async_create_scheduler_scene(
-    hass: HomeAssistant, entry_id: str, thermostat_name: str
+    hass: HomeAssistant, entry_id: str, thermostat_entity_id: str
 ) -> list[str]:
     """Persist scheduler switch states and return the entity_ids."""
-    scheduler_switches = get_scheduler_switches_for_thermostat(hass, thermostat_name)
+    scheduler_switches = get_scheduler_switches_for_thermostat(
+        hass, thermostat_entity_id
+    )
     if not scheduler_switches:
         _LOGGER.debug(
             "No scheduler switches found to snapshot for %s (%s)",
             entry_id,
-            thermostat_name,
+            thermostat_entity_id,
         )
         return []
 
@@ -515,11 +517,13 @@ async def async_finish_boost_for_entry(
                 boost_active_entity_id,
             )
 
-        thermostat_name = data[DATA_THERMOSTAT_NAME]
+        thermostat_entity_id = data[CONF_THERMOSTAT]
         schedule_override_active = _is_switch_on(
             hass, entry_id, UNIQUE_ID_SCHEDULE_OVERRIDE
         )
-        scheduler_switches = get_scheduler_switches_for_thermostat(hass, thermostat_name)
+        scheduler_switches = get_scheduler_switches_for_thermostat(
+            hass, thermostat_entity_id
+        )
         no_schedules_detected = not scheduler_switches
         has_scheduler_snapshot = await _has_scheduler_snapshot(hass, entry_id)
         _LOGGER.debug(

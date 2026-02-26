@@ -455,7 +455,7 @@ async def async_start_boost_for_entry(
     )
     if not boost_was_active:
         scheduler_switches = get_scheduler_switches_for_thermostat(
-            hass, data[DATA_THERMOSTAT_NAME]
+            hass, data[CONF_THERMOSTAT]
         )
         no_schedules_defined = not scheduler_switches
         stored_temperature = await async_store_target_temperature_snapshot(
@@ -554,7 +554,7 @@ async def async_start_boost_for_entry(
 
     if not boost_was_active and not schedule_override_active:
         scheduler_switches = await async_create_scheduler_scene(
-            hass, entry_id, data[DATA_THERMOSTAT_NAME]
+            hass, entry_id, data[CONF_THERMOSTAT]
         )
         if scheduler_switches:
             await hass.services.async_call(

@@ -16,7 +16,7 @@ from .boost_actions import (
     async_restore_scheduler_snapshot,
 )
 from .const import (
-    DATA_THERMOSTAT_NAME,
+    CONF_THERMOSTAT,
     DOMAIN,
     UNIQUE_ID_BOOST_ACTIVE,
     UNIQUE_ID_CALL_FOR_HEAT_ENABLED,
@@ -118,7 +118,7 @@ class ScheduleOverrideSwitch(ThermostatBoostEntity, SwitchEntity, RestoreEntity)
             scheduler_switches = await async_create_scheduler_scene(
                 self.hass,
                 self._entry.entry_id,
-                self._data[DATA_THERMOSTAT_NAME],
+                self._data[CONF_THERMOSTAT],
             )
             if scheduler_switches:
                 await self.hass.services.async_call(
