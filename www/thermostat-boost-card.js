@@ -470,6 +470,10 @@
         show_current_as_primary: true,
         features: [
           {
+            type: "climate-hvac-modes",
+            style: "icons",
+          },
+          {
             type: "climate-preset-modes",
             style: "dropdown",
           },
