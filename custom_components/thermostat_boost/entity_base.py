@@ -28,6 +28,7 @@ class ThermostatBoostEntity(Entity):
     """Base class for Thermostat Boost entities."""
 
     _attr_has_entity_name = False
+    _attr_entity_registry_visible_default = False
 
     def __init__(
         self,
