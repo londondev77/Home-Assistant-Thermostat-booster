@@ -12,6 +12,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.selector import selector
 
 from .const import (
+    CONF_CALL_FOR_HEAT_ENABLED,
     CONF_ENTRY_TYPE,
     CONF_THERMOSTAT,
     DOMAIN,
@@ -98,7 +99,8 @@ class ThermostatBoostConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             "mode": "dropdown",
                         }
                     }
-                )
+                ),
+                vol.Optional(CONF_CALL_FOR_HEAT_ENABLED, default=False): bool,
             }
         )
         return self.async_show_form(step_id="user", data_schema=data_schema)
@@ -117,6 +119,9 @@ class ThermostatBoostConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data={
                 CONF_ENTRY_TYPE: ENTRY_TYPE_THERMOSTAT,
                 CONF_THERMOSTAT: thermostat,
+                CONF_CALL_FOR_HEAT_ENABLED: bool(
+                    user_input.get(CONF_CALL_FOR_HEAT_ENABLED, False)
+                ),
             },
         )
 

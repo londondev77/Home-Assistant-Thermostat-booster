@@ -16,6 +16,7 @@ from .boost_actions import (
     async_restore_scheduler_snapshot,
 )
 from .const import (
+    CONF_CALL_FOR_HEAT_ENABLED,
     CONF_THERMOSTAT,
     DOMAIN,
     UNIQUE_ID_BOOST_ACTIVE,
@@ -159,11 +160,16 @@ class CallForHeatEnabledSwitch(ThermostatBoostEntity, SwitchEntity, RestoreEntit
             entity_name="Call for Heat enabled",
             unique_id_suffix=UNIQUE_ID_CALL_FOR_HEAT_ENABLED,
         )
-        self._is_on = False
+        self._is_on = bool(data.get(CONF_CALL_FOR_HEAT_ENABLED, False))
 
     async def async_added_to_hass(self) -> None:
         """Restore state on startup."""
         await super().async_added_to_hass()
+        # New entries carry an explicit config default from config flow.
+        # For legacy entries (before this field existed), fall back to RestoreEntity.
+        if CONF_CALL_FOR_HEAT_ENABLED in self._entry.data:
+            self._is_on = bool(self._entry.data.get(CONF_CALL_FOR_HEAT_ENABLED, False))
+            return
         if (state := await self.async_get_last_state()) is not None:
             self._is_on = state.state == STATE_ON
 
@@ -175,12 +181,29 @@ class CallForHeatEnabledSwitch(ThermostatBoostEntity, SwitchEntity, RestoreEntit
     async def async_turn_on(self, **kwargs) -> None:
         """Turn the switch on."""
         self._is_on = True
+        self._async_persist_call_for_heat_setting()
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs) -> None:
         """Turn the switch off."""
         self._is_on = False
+        self._async_persist_call_for_heat_setting()
         self.async_write_ha_state()
+
+    @callback
+    def _async_persist_call_for_heat_setting(self) -> None:
+        """Persist current call-for-heat preference in config entry/runtime data."""
+        # Keep runtime data in sync for in-session consumers.
+        entry_data = self.hass.data.get(DOMAIN, {}).get(self._entry.entry_id)
+        if isinstance(entry_data, dict):
+            entry_data[CONF_CALL_FOR_HEAT_ENABLED] = self._is_on
+
+        # Persist in config entry so restart behavior matches latest toggle state.
+        new_data = dict(self._entry.data)
+        if new_data.get(CONF_CALL_FOR_HEAT_ENABLED) == self._is_on:
+            return
+        new_data[CONF_CALL_FOR_HEAT_ENABLED] = self._is_on
+        self.hass.config_entries.async_update_entry(self._entry, data=new_data)
 
 
 @callback

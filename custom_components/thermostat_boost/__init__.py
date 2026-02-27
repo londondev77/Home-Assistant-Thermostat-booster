@@ -12,6 +12,7 @@ from .boost_actions import (
     async_finish_boost_for_entry,
 )
 from .const import (
+    CONF_CALL_FOR_HEAT_ENABLED,
     CONF_ENTRY_TYPE,
     CONF_THERMOSTAT,
     DATA_THERMOSTAT_NAME,
@@ -64,6 +65,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id] = {
         CONF_ENTRY_TYPE: ENTRY_TYPE_THERMOSTAT,
         CONF_THERMOSTAT: thermostat_entity_id,
+        CONF_CALL_FOR_HEAT_ENABLED: bool(
+            entry.data.get(CONF_CALL_FOR_HEAT_ENABLED, False)
+        ),
         DATA_THERMOSTAT_NAME: thermostat_name,
     }
 

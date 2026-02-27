@@ -4,6 +4,7 @@ DOMAIN = "thermostat_boost"
 
 CONF_THERMOSTAT = "thermostat"
 CONF_ENTRY_TYPE = "entry_type"
+CONF_CALL_FOR_HEAT_ENABLED = "call_for_heat_enabled"
 
 DATA_THERMOSTAT_NAME = "thermostat_name"
 

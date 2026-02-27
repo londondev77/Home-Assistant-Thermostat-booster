@@ -6,7 +6,11 @@
         "title": "Select a thermostat",
         "description": "Choose the thermostat you want to control.",
         "data": {
-          "thermostat": "Thermostat"
+          "thermostat": "Thermostat",
+          "call_for_heat_enabled": "Allow thermostat to Call for Heat"
+        },
+        "data_description": {
+          "call_for_heat_enabled": "This setting can be changed by visiting the Device Info page in Devices & Services"
         }
       }
     },

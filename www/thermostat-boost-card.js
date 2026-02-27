@@ -657,37 +657,19 @@
         });
       }
 
-      if (
-        resolved.callForHeatEnabledEntityId ||
-        (useSchedulerComponentCard && resolved.scheduleOverrideEntityId)
-      ) {
+      if (useSchedulerComponentCard && resolved.scheduleOverrideEntityId) {
         const entities = [];
-        if (resolved.callForHeatEnabledEntityId) {
-          entities.push({
-            entity: resolved.callForHeatEnabledEntityId,
-            name: "Call for Heat enabled",
-            icon: "mdi:fire",
-            tap_action: {
-              action: "none",
-            },
-            hold_action: {
-              action: "none",
-            },
-          });
-        }
-        if (useSchedulerComponentCard && resolved.scheduleOverrideEntityId) {
-          entities.push({
-            entity: resolved.scheduleOverrideEntityId,
-            name: "Disable Schedules",
-            icon: "mdi:grid-off",
-            tap_action: {
-              action: "none",
-            },
-            hold_action: {
-              action: "none",
-            },
-          });
-        }
+        entities.push({
+          entity: resolved.scheduleOverrideEntityId,
+          name: "Disable Schedules",
+          icon: "mdi:grid-off",
+          tap_action: {
+            action: "none",
+          },
+          hold_action: {
+            action: "none",
+          },
+        });
 
         cards.push({
           type: "entities",
