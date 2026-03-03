@@ -28,6 +28,7 @@ THERMOSTAT_PLATFORMS: list[Platform] = [
     Platform.SWITCH,
     Platform.NUMBER,
     Platform.SENSOR,
+    Platform.BINARY_SENSOR,
 ]
 
 AGGREGATE_PLATFORMS: list[Platform] = [

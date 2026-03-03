@@ -11,6 +11,7 @@ from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 
+from .binary_sensor import async_set_boost_active_state
 from .const import (
     CONF_THERMOSTAT,
     DATA_THERMOSTAT_NAME,
@@ -502,20 +503,11 @@ async def async_finish_boost_for_entry(
                 time_selector_entity_id,
             )
 
-        boost_active_entity_id = _get_entity_id(hass, entry_id, UNIQUE_ID_BOOST_ACTIVE)
-        if boost_active_entity_id:
-            await hass.services.async_call(
-                "switch",
-                "turn_off",
-                {"entity_id": boost_active_entity_id},
-                blocking=True,
-            )
-            _LOGGER.debug(
-                "Finish boost step complete for %s: boost marked inactive "
-                "(entity_id=%s)",
-                entry_id,
-                boost_active_entity_id,
-            )
+        async_set_boost_active_state(hass, entry_id, False)
+        _LOGGER.debug(
+            "Finish boost step complete for %s: boost marked inactive",
+            entry_id,
+        )
 
         thermostat_entity_id = data[CONF_THERMOSTAT]
         schedule_override_active = _is_switch_on(

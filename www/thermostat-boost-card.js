@@ -13,16 +13,24 @@
     "Turning schedules on/off is disabled when either a boost is active or Disable Schedules is on";
   const SCHEDULE_OVERRIDE_LOCK_TOOLTIP =
     "Disable Schedules cannot be changed when a boost is active";
-  const DISABLED_TOGGLE_OPACITY = "20%";
+  const DISABLED_TOGGLE_OPACITY = "0.2";
   const SLIDER_STATE_MIN_WIDTH = "8ch";
 
   const computeLabel = (device) =>
     device?.name_by_user || device?.name || device?.id || "Thermostat Boost";
 
-  const findEntityId = (entities, deviceId, suffix) => {
-    const match = entities.find(
+  const findEntityId = (entities, deviceId, suffix, preferredDomain = null) => {
+    const matches = entities.filter(
       (entry) => entry.device_id === deviceId && entry.entity_id.endsWith(suffix)
     );
+    if (matches.length === 0) return null;
+    if (preferredDomain) {
+      const preferred = matches.find((entry) =>
+        entry.entity_id.startsWith(`${preferredDomain}.`)
+      );
+      if (preferred) return preferred.entity_id;
+    }
+    const match = matches[0];
     return match ? match.entity_id : null;
   };
 
@@ -230,7 +238,8 @@
         boostActiveEntityId: findEntityId(
           entityList,
           deviceId,
-          BOOST_ACTIVE_SUFFIX
+          BOOST_ACTIVE_SUFFIX,
+          "binary_sensor"
         ),
         boostFinishEntityId: findEntityId(
           entityList,
@@ -658,23 +667,24 @@
       }
 
       if (useSchedulerComponentCard && resolved.scheduleOverrideEntityId) {
-        const entities = [];
-        entities.push({
+        cards.push({
+          type: "tile",
           entity: resolved.scheduleOverrideEntityId,
           name: "Disable Schedules",
           icon: "mdi:grid-off",
+          hide_state: true,
+          features_position: "inline",
           tap_action: {
             action: "none",
           },
-          hold_action: {
+          icon_tap_action: {
             action: "none",
           },
-        });
-
-        cards.push({
-          type: "entities",
-          show_header_toggle: false,
-          entities,
+          features: [
+            {
+              type: "toggle",
+            },
+          ],
         });
       }
 
@@ -786,6 +796,9 @@
             node?.entityId === entityId
           );
         }
+        if (node?.entity === entityId) return true;
+        if (node?.config?.entity === entityId) return true;
+        if (node?._config?.entity === entityId) return true;
         if (node?.config?.entity === entityId) return true;
         if (node?.entityId === entityId) return true;
         if (typeof node?.getAttribute === "function") {
@@ -797,6 +810,21 @@
         }
         return false;
       });
+    }
+
+    _toggleMatchesEntity(toggleNode, entityId) {
+      if (!toggleNode || !entityId) return false;
+      let current = toggleNode;
+      while (current) {
+        if (this._pathContainsEntity([current], entityId)) {
+          return true;
+        }
+        if (current.host && this._pathContainsEntity([current.host], entityId)) {
+          return true;
+        }
+        current = current.parentNode || current.host || null;
+      }
+      return false;
     }
 
     _handleSchedulerLockEvent(ev) {
@@ -832,10 +860,9 @@
       if (!onToggle) return;
 
       const scheduleOverrideEntityId = this._resolved?.scheduleOverrideEntityId;
-      const onScheduleOverrideToggle = this._pathContainsEntity(
-        path,
-        scheduleOverrideEntityId
-      );
+      const onScheduleOverrideToggle =
+        this._pathContainsEntity(path, scheduleOverrideEntityId) ||
+        this._toggleMatchesEntity(toggleNode, scheduleOverrideEntityId);
       if (onScheduleOverrideToggle) {
         if (!this._isBoostActive()) return;
         if (toggleNode?.style) {
@@ -901,6 +928,9 @@
 
       const onScheduleOverrideToggle = this._pathContainsEntity(
         path,
+        this._resolved?.scheduleOverrideEntityId
+      ) || this._toggleMatchesEntity(
+        toggleNode,
         this._resolved?.scheduleOverrideEntityId
       );
       if (onScheduleOverrideToggle) {
@@ -1032,7 +1062,12 @@
           parentPath.push(node);
           node = node.parentNode || node.host || null;
         }
-        if (!this._pathContainsEntity(parentPath, overrideEntityId)) return;
+        if (
+          !this._pathContainsEntity(parentPath, overrideEntityId) &&
+          !this._toggleMatchesEntity(toggle, overrideEntityId)
+        ) {
+          return;
+        }
         toggle.style.pointerEvents = "";
         toggle.style.cursor = overrideToggleLock ? "not-allowed" : "";
         this._setMdcSwitchOpacity(toggle, overrideToggleLock);
@@ -1046,32 +1081,47 @@
     }
 
     _setMdcSwitchOpacity(toggle, locked) {
-      const mdcSwitch = this._findMdcSwitch(toggle);
-      if (!mdcSwitch?.style) return;
-      mdcSwitch.style.opacity = locked ? DISABLED_TOGGLE_OPACITY : "";
+      const opacity = locked ? DISABLED_TOGGLE_OPACITY : "";
+      const switchVisual = this._findSwitchVisualTarget(toggle) || toggle;
+      if (switchVisual?.style) {
+        switchVisual.style.opacity = opacity;
+      }
+      const innerSwitch = switchVisual?.shadowRoot?.querySelector?.(".switch");
+      if (innerSwitch?.style) {
+        innerSwitch.style.opacity = opacity;
+      }
     }
 
-    _findMdcSwitch(toggle) {
+    _findSwitchVisualTarget(toggle) {
       if (!toggle) return null;
-      if (toggle.classList?.contains("mdc-switch")) {
-        return toggle;
+      let switchFallback = null;
+      let current = toggle;
+      while (current) {
+        const tag = current?.tagName?.toLowerCase?.();
+        if (tag === "ha-control-switch") {
+          return current;
+        }
+        if (current.classList?.contains("mdc-switch")) {
+          return current;
+        }
+        if (!switchFallback && current.classList?.contains("switch")) {
+          switchFallback = current;
+        }
+        current = current.parentNode || current.host || null;
       }
 
-      if (typeof toggle.closest === "function") {
-        const closest = toggle.closest(".mdc-switch");
-        if (closest) return closest;
-      }
-
+      const selector = "ha-control-switch, .mdc-switch, .switch";
       if (toggle.shadowRoot?.querySelector) {
-        const inShadow = toggle.shadowRoot.querySelector(".mdc-switch");
+        const inShadow = toggle.shadowRoot.querySelector(selector);
         if (inShadow) return inShadow;
       }
 
       if (typeof toggle.querySelector === "function") {
-        return toggle.querySelector(".mdc-switch");
+        const child = toggle.querySelector(selector);
+        if (child) return child;
       }
 
-      return null;
+      return switchFallback;
     }
 
     _queryDeep(selector) {

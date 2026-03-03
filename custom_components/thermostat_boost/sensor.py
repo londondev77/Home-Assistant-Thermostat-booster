@@ -34,6 +34,7 @@ from .boost_actions import (
     async_finish_boost_for_entry,
     async_store_target_temperature_snapshot,
 )
+from .binary_sensor import async_set_boost_active_state
 from .number import _dynamic_boost_temperature_bounds
 from .const import (
     CONF_THERMOSTAT,
@@ -538,19 +539,11 @@ async def async_start_boost_for_entry(
         timer.snapshot().end,
     )
 
-    boost_active_entity_id = _get_entity_id(hass, entry_id, UNIQUE_ID_BOOST_ACTIVE)
-    if boost_active_entity_id:
-        await hass.services.async_call(
-            "switch",
-            "turn_on",
-            {"entity_id": boost_active_entity_id},
-            blocking=True,
-        )
-        _LOGGER.debug(
-            "Start boost step complete for %s: boost marked active (entity_id=%s)",
-            entry_id,
-            boost_active_entity_id,
-        )
+    async_set_boost_active_state(hass, entry_id, True)
+    _LOGGER.debug(
+        "Start boost step complete for %s: boost marked active",
+        entry_id,
+    )
 
     if not boost_was_active and not schedule_override_active:
         scheduler_switches = await async_create_scheduler_scene(
