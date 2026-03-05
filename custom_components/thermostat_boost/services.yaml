@@ -11,6 +11,7 @@ start_boost:
           integration: thermostat_boost
           entity:
             domain: sensor
+          multiple: true
     time:
       name: Time
       description: Optional. Overrides Boost Time Selector when provided. Uses duration selector values (days/hours/minutes/seconds). Cannot be zero.

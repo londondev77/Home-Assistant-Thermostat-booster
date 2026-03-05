@@ -5,6 +5,7 @@ from __future__ import annotations
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.const import Platform
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from .boost_actions import (
     async_clear_scheduler_snapshot,
@@ -20,6 +21,8 @@ from .const import (
     ENTRY_TYPE_AGGREGATE,
     ENTRY_TYPE_THERMOSTAT,
     EVENT_TIMER_FINISHED,
+    SERVICE_FINISH_BOOST,
+    SERVICE_START_BOOST,
 )
 from .entity_base import get_thermostat_name
 from .timer_manager import async_get_timer_registry
@@ -34,6 +37,14 @@ THERMOSTAT_PLATFORMS: list[Platform] = [
 AGGREGATE_PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
 ]
+
+_AGGREGATE_DEVICE_IDENTIFIER = "call_for_heat_aggregate"
+_DELETE_CALL_FOR_HEAT_BLOCKED_MESSAGE = (
+    "You are not able to delete Call for Heat manually. "
+    "It will be automatically deleted if you remove all thermostats added to "
+    "Thermostat Boost."
+)
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Thermostat Boost from a config entry."""
@@ -115,12 +126,17 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             registry = await async_get_timer_registry(hass)
             await registry.async_unload_entry(entry.entry_id)
             hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+            if not _get_thermostat_entries(hass, exclude_entry_id=entry.entry_id):
+                _cleanup_domain_shared_state(hass)
             aggregate = hass.data.get(DOMAIN, {}).get("call_for_heat_aggregate_entity")
             if aggregate is not None:
                 aggregate.async_refresh_tracked_entities()
         else:
             hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
             hass.data.get(DOMAIN, {}).pop("call_for_heat_aggregate_entity", None)
+            if _get_thermostat_entries(hass):
+                await _async_notify_call_for_heat_delete_blocked(hass)
+                await _async_ensure_aggregate_entry(hass)
     return unload_ok
 
 
@@ -128,6 +144,9 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Remove a Thermostat Boost config entry and clear persisted state."""
     entry_type = entry.data.get(CONF_ENTRY_TYPE, ENTRY_TYPE_THERMOSTAT)
     if entry_type == ENTRY_TYPE_AGGREGATE:
+        if _get_thermostat_entries(hass):
+            await _async_notify_call_for_heat_delete_blocked(hass)
+            await _async_ensure_aggregate_entry(hass)
         return
 
     registry = await async_get_timer_registry(hass)
@@ -135,7 +154,34 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await async_clear_scheduler_snapshot(hass, entry.entry_id)
     await async_clear_target_temperature_snapshot(hass, entry.entry_id)
     if not _get_thermostat_entries(hass, exclude_entry_id=entry.entry_id):
+        _cleanup_domain_shared_state(hass)
         await _async_remove_aggregate_entries(hass)
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    device_entry: dr.DeviceEntry | str,
+) -> bool:
+    """Block manual deletion of the aggregate Call for Heat device."""
+    del config_entry
+    if isinstance(device_entry, str):
+        device_registry = dr.async_get(hass)
+        resolved_device_entry = device_registry.async_get(device_entry)
+        if resolved_device_entry is None:
+            return True
+        device_entry = resolved_device_entry
+
+    if not _is_call_for_heat_aggregate_device(hass, device_entry):
+        return True
+
+    # Preserve expected behavior: once all thermostat entries are gone, aggregate
+    # removal is allowed.
+    if not _get_thermostat_entries(hass):
+        return True
+
+    await _async_notify_call_for_heat_delete_blocked(hass)
+    return False
 
 
 def _get_thermostat_entries(
@@ -182,6 +228,35 @@ async def _async_remove_aggregate_entries(hass: HomeAssistant) -> None:
         await hass.config_entries.async_remove(aggregate_entry.entry_id)
 
 
+async def _async_notify_call_for_heat_delete_blocked(hass: HomeAssistant) -> None:
+    """Show a stable message when manual aggregate deletion is blocked/reverted."""
+    await hass.services.async_call(
+        "persistent_notification",
+        "create",
+        {
+            "title": "Thermostat Boost",
+            "message": _DELETE_CALL_FOR_HEAT_BLOCKED_MESSAGE,
+            "notification_id": f"{DOMAIN}_call_for_heat_delete_blocked",
+        },
+        blocking=True,
+    )
+
+
+def _cleanup_domain_shared_state(hass: HomeAssistant) -> None:
+    """Tear down domain-level listeners/services once no thermostats remain."""
+    domain_data = hass.data.setdefault(DOMAIN, {})
+
+    if (finish_listener_unsub := domain_data.pop("finish_listener", None)) is not None:
+        finish_listener_unsub()
+
+    domain_data.pop("finish_callback", None)
+
+    if hass.services.has_service(DOMAIN, SERVICE_START_BOOST):
+        hass.services.async_remove(DOMAIN, SERVICE_START_BOOST)
+    if hass.services.has_service(DOMAIN, SERVICE_FINISH_BOOST):
+        hass.services.async_remove(DOMAIN, SERVICE_FINISH_BOOST)
+
+
 def _cleanup_legacy_aggregate_entity_binding(hass: HomeAssistant) -> None:
     """Remove aggregate entity rows incorrectly bound to thermostat entries."""
     entity_reg = er.async_get(hass)
@@ -211,3 +286,32 @@ def _cleanup_legacy_aggregate_entity_binding(hass: HomeAssistant) -> None:
 
         if bound_to_thermostat or has_stale_name:
             entity_reg.async_remove(entity_entry.entity_id)
+
+
+def _is_call_for_heat_aggregate_device(
+    hass: HomeAssistant, device_entry: dr.DeviceEntry
+) -> bool:
+    if any(
+        domain == DOMAIN and identifier == _AGGREGATE_DEVICE_IDENTIFIER
+        for domain, identifier in device_entry.identifiers
+    ):
+        return True
+
+    if (
+        device_entry.manufacturer == "Thermostat Boost"
+        and device_entry.model == "Aggregate"
+    ):
+        return True
+
+    entity_reg = er.async_get(hass)
+    aggregate_unique_ids = {
+        f"{DOMAIN}_call_for_heat_active",
+        f"{DOMAIN}_call_for_heat",
+    }
+    for entity_entry in er.async_entries_for_device(
+        entity_reg, device_entry.id, include_disabled_entities=True
+    ):
+        if entity_entry.unique_id in aggregate_unique_ids:
+            return True
+
+    return False

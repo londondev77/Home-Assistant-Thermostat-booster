@@ -443,7 +443,7 @@
             line-height: 1.1;
           }
           ${heatingSubButtonClass} {
-            background-color: \${hass.states['${resolved.thermostatEntityId}'].attributes.hvac_action === 'heating'
+            background-color: \${hass.states['${resolved.thermostatEntityId}']?.attributes?.hvac_action === 'heating'
               ? 'var(--state-climate-heat-color)'
               : 'var(--card-background-color)'} !important;
           }

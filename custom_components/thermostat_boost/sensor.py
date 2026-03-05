@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 import logging
 from typing import Callable
@@ -54,6 +55,7 @@ from .scheduler_utils import get_scheduler_switches_for_thermostat
 from .timer_manager import async_get_timer_registry
 
 _LOGGER = logging.getLogger(__name__)
+_SERVICE_SETUP_LOCK_KEY = "service_setup_lock"
 
 _START_BOOST_SERVICE_SCHEMA = vol.Schema(
     {
@@ -91,62 +93,59 @@ async def async_setup_entry(
     data = hass.data[DOMAIN][entry.entry_id]
     async_add_entities([BoostFinishSensor(hass, entry, data)])
 
-    finish_boost_service_key = "finish_boost_service_registered"
-    if not hass.data[DOMAIN].get(finish_boost_service_key):
-        async def _async_handle_finish_boost(call: ServiceCall) -> None:
-            entry_ids: set[str] = set()
-            for device_id in _normalize_to_list(call.data.get("device_id")):
-                entry_id = _entry_id_from_device_id(hass, device_id)
-                if entry_id is None:
-                    raise HomeAssistantError(
-                        f"Unable to resolve thermostat_boost entry from device_id: {device_id}"
+    async with _get_service_setup_lock(hass):
+        if not hass.services.has_service(DOMAIN, SERVICE_FINISH_BOOST):
+            async def _async_handle_finish_boost(call: ServiceCall) -> None:
+                entry_ids: set[str] = set()
+                for device_id in _normalize_to_list(call.data.get("device_id")):
+                    entry_id = _entry_id_from_device_id(hass, device_id)
+                    if entry_id is None:
+                        raise HomeAssistantError(
+                            f"Unable to resolve thermostat_boost entry from device_id: {device_id}"
+                        )
+                    entry_ids.add(entry_id)
+
+                if not entry_ids:
+                    raise HomeAssistantError("finish_boost requires device_id.")
+
+                for resolved_entry_id in entry_ids:
+                    await async_finish_boost_for_entry(hass, resolved_entry_id)
+
+            hass.services.async_register(
+                DOMAIN,
+                SERVICE_FINISH_BOOST,
+                _async_handle_finish_boost,
+                schema=_FINISH_BOOST_SERVICE_SCHEMA,
+            )
+
+        if not hass.services.has_service(DOMAIN, SERVICE_START_BOOST):
+            async def _async_handle_start_boost(call: ServiceCall) -> None:
+                entry_ids: set[str] = set()
+                for device_id in _normalize_to_list(call.data.get("device_id")):
+                    entry_id = _entry_id_from_device_id(hass, device_id)
+                    if entry_id is None:
+                        raise HomeAssistantError(
+                            f"Unable to resolve thermostat_boost entry from device_id: {device_id}"
+                        )
+                    entry_ids.add(entry_id)
+
+                if not entry_ids:
+                    raise HomeAssistantError("start_boost requires device_id.")
+
+                for resolved_entry_id in entry_ids:
+                    await async_start_boost_for_entry(
+                        hass,
+                        resolved_entry_id,
+                        time=call.data.get("time"),
+                        temperature=call.data.get("temperature"),
                     )
-                entry_ids.add(entry_id)
 
-            if not entry_ids:
-                raise HomeAssistantError("finish_boost requires device_id.")
-
-            for resolved_entry_id in entry_ids:
-                await async_finish_boost_for_entry(hass, resolved_entry_id)
-
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_FINISH_BOOST,
-            _async_handle_finish_boost,
-            schema=_FINISH_BOOST_SERVICE_SCHEMA,
-        )
-        hass.data[DOMAIN][finish_boost_service_key] = True
-
-    start_boost_service_key = "start_boost_service_registered"
-    if not hass.data[DOMAIN].get(start_boost_service_key):
-        async def _async_handle_start_boost(call: ServiceCall) -> None:
-            entry_ids: set[str] = set()
-            for device_id in _normalize_to_list(call.data.get("device_id")):
-                entry_id = _entry_id_from_device_id(hass, device_id)
-                if entry_id is None:
-                    raise HomeAssistantError(
-                        f"Unable to resolve thermostat_boost entry from device_id: {device_id}"
-                    )
-                entry_ids.add(entry_id)
-
-            if not entry_ids:
-                raise HomeAssistantError("start_boost requires device_id.")
-
-            for entry_id in entry_ids:
-                await async_start_boost_for_entry(
-                    hass,
-                    entry_id,
-                    time=call.data.get("time"),
-                    temperature=call.data.get("temperature"),
-                )
-
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_START_BOOST,
-            _async_handle_start_boost,
-            schema=_START_BOOST_SERVICE_SCHEMA,
-        )
-        hass.data[DOMAIN][start_boost_service_key] = True
+            hass.services.async_register(
+                DOMAIN,
+                SERVICE_START_BOOST,
+                _async_handle_start_boost,
+                schema=_START_BOOST_SERVICE_SCHEMA,
+            )
 
     if hass.services.has_service(DOMAIN, SERVICE_START_BOOST):
         _async_update_start_boost_service_schema(hass)
@@ -302,19 +301,26 @@ def _normalize_to_list(value) -> list[str]:
 
 
 @callback
+def _get_service_setup_lock(hass: HomeAssistant) -> asyncio.Lock:
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    lock = domain_data.get(_SERVICE_SETUP_LOCK_KEY)
+    if isinstance(lock, asyncio.Lock):
+        return lock
+    lock = asyncio.Lock()
+    domain_data[_SERVICE_SETUP_LOCK_KEY] = lock
+    return lock
+
+
+@callback
 def _entry_id_from_device_id(hass: HomeAssistant, device_id: str) -> str | None:
     domain_data = hass.data.get(DOMAIN, {})
-    for entry_id in domain_data:
-        if entry_id in (
-            "timer_services_registered",
-            "start_boost_service_registered",
-            "finish_boost_service_registered",
-        ):
+    entity_reg = er.async_get(hass)
+    for entry_id, entry_data in domain_data.items():
+        if not isinstance(entry_data, dict) or CONF_THERMOSTAT not in entry_data:
             continue
         finish_entity_id = _get_entity_id(hass, entry_id, UNIQUE_ID_BOOST_FINISH)
         if not finish_entity_id:
             continue
-        entity_reg = er.async_get(hass)
         reg_entry = entity_reg.async_get(finish_entity_id)
         if reg_entry is not None and reg_entry.device_id == device_id:
             return entry_id
@@ -382,6 +388,7 @@ def _async_update_start_boost_service_schema(hass: HomeAssistant) -> None:
                         "device": {
                             "integration": DOMAIN,
                             "entity": {"domain": "sensor"},
+                            "multiple": True,
                         }
                     },
                 },
