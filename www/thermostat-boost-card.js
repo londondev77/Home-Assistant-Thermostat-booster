@@ -4,6 +4,7 @@
   const DOMAIN = "thermostat_boost";
   const CARD_TYPE = "thermostat-boost-card";
   const ALL_CARD_TYPE = "thermostat-boost-all-card";
+  const CANCEL_ALL_CARD_TYPE = "thermostat-boost-cancel-all-card";
   const BOOST_TEMP_SUFFIX = "_boost_temperature";
   const BOOST_TIME_SUFFIX = "_boost_time_selector";
   const BOOST_ACTIVE_SUFFIX = "_boost_active";
@@ -86,7 +87,6 @@
       this._mainStartButtonRefreshTimer = null;
       this._mainStartButtonRefreshTimers = [];
       this._schedulerLockRefreshTimer = null;
-      this._sliderStyleRefreshTimer = null;
       this._pendingScheduleOverrideLockUntil = 0;
       this._lastBoostActiveState = null;
       this._popupHash = null;
@@ -202,10 +202,6 @@
       if (this._schedulerLockRefreshTimer) {
         clearTimeout(this._schedulerLockRefreshTimer);
         this._schedulerLockRefreshTimer = null;
-      }
-      if (this._sliderStyleRefreshTimer) {
-        clearTimeout(this._sliderStyleRefreshTimer);
-        this._sliderStyleRefreshTimer = null;
       }
       if (this._bubbleHeaderCard?.timer) {
         clearInterval(this._bubbleHeaderCard.timer);
@@ -1531,7 +1527,6 @@
       this._error = "";
       this._tempDelta = 0;
       this._hours = 0;
-      this._sliderStyleRefreshTimer = null;
       this._startButtonRefreshTimer = null;
       this._startButtonRefreshTimers = [];
       this._selectedDeviceIds = [];
@@ -1582,10 +1577,6 @@
     }
 
     disconnectedCallback() {
-      if (this._sliderStyleRefreshTimer) {
-        clearTimeout(this._sliderStyleRefreshTimer);
-        this._sliderStyleRefreshTimer = null;
-      }
       if (this._startButtonRefreshTimer) {
         clearTimeout(this._startButtonRefreshTimer);
         this._startButtonRefreshTimer = null;
@@ -1737,7 +1728,7 @@
         .map((device) => device.deviceId)
         .filter(Boolean);
       if (deviceIds.length === 0) {
-        this._error = "No eligible thermostats found for all-boost start.";
+        this._error = "No eligible thermostats found for multiple thermostat boost.";
         this._renderStack();
         return;
       }
@@ -1759,7 +1750,7 @@
           await this._renderStack();
         }
       } catch (_err) {
-        this._error = "Failed to start all thermostats boost.";
+        this._error = "Failed to start boost for selected thermostats.";
         this._renderStack();
       }
     }
@@ -1940,36 +1931,6 @@
               double_tap_action: {
                 action: "none",
               },
-            },
-          ],
-        },
-        {
-          type: "custom:thermostat-boost-divider",
-        },
-        {
-          type: "horizontal-stack",
-          cards: [
-            {
-              type: "tile",
-              entity: "sensor.thermostat_boost_all_finish",
-              tap_action: {
-                action: "call-service",
-                service: `${DOMAIN}.finish_boost`,
-                service_data: {
-                  device_id: "__all_thermostat_boost_devices__",
-                },
-              },
-              icon_tap_action: {
-                action: "call-service",
-                service: `${DOMAIN}.finish_boost`,
-                service_data: {
-                  device_id: "__all_thermostat_boost_devices__",
-                },
-              },
-              color: "red",
-              name: "Cancel boost on ALL thermostats",
-              hide_state: true,
-              icon: "mdi:rocket",
             },
           ],
         },
@@ -2211,6 +2172,57 @@
       this._selectedDeviceIds = Object.keys(selection).filter(
         (deviceId) => selection[deviceId] && allowed.has(deviceId)
       );
+    }
+  }
+
+  class ThermostatBoostCancelAllCard extends ThermostatBoostAllCard {
+    static getStubConfig() {
+      return {
+        type: `custom:${CANCEL_ALL_CARD_TYPE}`,
+      };
+    }
+
+    getCardSize() {
+      return 1;
+    }
+
+    _buildStackConfig() {
+      const cancelAction = {
+        action: "call-service",
+        service: `${DOMAIN}.finish_boost`,
+        service_data: {
+          device_id: "__all_thermostat_boost_devices__",
+        },
+      };
+      const cards = [
+        {
+          type: "horizontal-stack",
+          cards: [
+            {
+              type: "tile",
+              entity: "sensor.thermostat_boost_all_finish",
+              tap_action: cancelAction,
+              icon_tap_action: cancelAction,
+              color: "red",
+              name: "Cancel boost on ALL thermostats",
+              hide_state: true,
+              icon: "mdi:rocket",
+            },
+          ],
+        },
+      ];
+
+      if (this._error) {
+        cards.push({
+          type: "markdown",
+          content: `**Error:** ${this._error}`,
+        });
+      }
+
+      return {
+        type: "vertical-stack",
+        cards,
+      };
     }
   }
 
@@ -2785,6 +2797,9 @@
   if (!customElements.get(ALL_CARD_TYPE)) {
     customElements.define(ALL_CARD_TYPE, ThermostatBoostAllCard);
   }
+  if (!customElements.get(CANCEL_ALL_CARD_TYPE)) {
+    customElements.define(CANCEL_ALL_CARD_TYPE, ThermostatBoostCancelAllCard);
+  }
 
   window.customCards = window.customCards || [];
   if (!window.customCards.some((card) => card.type === CARD_TYPE)) {
@@ -2797,8 +2812,15 @@
   if (!window.customCards.some((card) => card.type === ALL_CARD_TYPE)) {
     window.customCards.push({
       type: ALL_CARD_TYPE,
-      name: "All Thermostats Boost",
-      description: "Start/cancel boost for all Thermostat Boost devices",
+      name: "Thermostat Boost - multiple thermostats",
+      description: "Apply an offset boost to a number of Thermostat Boost devices",
+    });
+  }
+  if (!window.customCards.some((card) => card.type === CANCEL_ALL_CARD_TYPE)) {
+    window.customCards.push({
+      type: CANCEL_ALL_CARD_TYPE,
+      name: "Thermostat Boost - cancel all button",
+      description: "A button to cancel all active boosts for Thermostat Boost devices. This is kept separate from the other cards so you can place it where it makes sense to you",
     });
   }
 
