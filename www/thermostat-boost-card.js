@@ -3,18 +3,26 @@
   const VERSION = "1.0.0";
   const DOMAIN = "thermostat_boost";
   const CARD_TYPE = "thermostat-boost-card";
+  const ALL_CARD_TYPE = "thermostat-boost-all-card";
   const BOOST_TEMP_SUFFIX = "_boost_temperature";
   const BOOST_TIME_SUFFIX = "_boost_time_selector";
   const BOOST_ACTIVE_SUFFIX = "_boost_active";
   const BOOST_FINISH_SUFFIX = "_boost_finish";
   const CALL_FOR_HEAT_ENABLED_SUFFIX = "_call_for_heat_enabled";
   const SCHEDULE_OVERRIDE_SUFFIX = "_disable_schedules";
+  const CALL_FOR_HEAT_AGGREGATE_ID = "call_for_heat_aggregate";
   const SCHEDULE_SWITCH_LOCK_TOOLTIP =
     "Turning schedules on/off is disabled when either a boost is active or Disable Schedules is on";
   const SCHEDULE_OVERRIDE_LOCK_TOOLTIP =
     "Disable Schedules cannot be changed when a boost is active";
   const DISABLED_TOGGLE_OPACITY = "0.2";
-  const SLIDER_STATE_MIN_WIDTH = "8ch";
+  const DISABLED_BUTTON_OPACITY = "0.45";
+  const MAIN_BOOST_DISABLED_TOOLTIP =
+    "Button disabled until a boost duration is selected";
+  const ALL_BOOST_DISABLED_TOOLTIP =
+    "Button disabled until a boost temperature and time are selected";
+  const ALL_BOOST_CANCEL_DISABLED_TOOLTIP =
+    "Button disabled until a thermostat boost is active";
 
   const computeLabel = (device) =>
     device?.name_by_user || device?.name || device?.id || "Thermostat Boost";
@@ -73,8 +81,13 @@
       this._mainStackConfig = null;
       this._bubbleHookTimer = null;
       this._bubbleCountdownTimer = null;
+      this._mainStartButtonRefreshTimer = null;
+      this._mainStartButtonRefreshTimers = [];
       this._schedulerLockRefreshTimer = null;
+      this._sliderStyleRefreshTimer = null;
       this._pendingScheduleOverrideLockUntil = 0;
+      this._lastBoostActiveState = null;
+      this._popupHash = null;
 
       const style = document.createElement("style");
       style.textContent = `
@@ -138,6 +151,8 @@
       window.__thermostatBoostCardLastConfig = this._config;
       this._resolved = null;
       this._resolving = null;
+      this._lastBoostActiveState = null;
+      this._popupHash = null;
       this._root.innerHTML = "";
       this._root.appendChild(this._message);
       this._setMessage("Choose a thermostat to display in this card.");
@@ -146,10 +161,25 @@
 
     set hass(hass) {
       this._hass = hass;
+      const boostActiveEntityId = this._resolved?.boostActiveEntityId;
+      const nextBoostActiveState = boostActiveEntityId
+        ? this._hass?.states?.[boostActiveEntityId]?.state ?? null
+        : null;
+      const boostActiveChanged =
+        Boolean(boostActiveEntityId) &&
+        nextBoostActiveState !== this._lastBoostActiveState;
+      this._lastBoostActiveState = nextBoostActiveState;
+
+      if (boostActiveChanged && this._resolved) {
+        if (!this._isPopupOpen()) {
+          this._renderCards(this._resolved);
+          return;
+        }
+      }
       if (this._bubbleHeaderCard) this._bubbleHeaderCard.hass = hass;
       if (this._mainStack) this._mainStack.hass = hass;
       this._applySchedulerLockState();
-      this._applySliderStateStyles();
+      this._queueMainStartButtonStateRefresh();
       this._ensureResolved();
     }
 
@@ -162,9 +192,18 @@
         clearInterval(this._bubbleCountdownTimer);
         this._bubbleCountdownTimer = null;
       }
+      if (this._mainStartButtonRefreshTimer) {
+        clearTimeout(this._mainStartButtonRefreshTimer);
+        this._mainStartButtonRefreshTimer = null;
+      }
+      this._clearMainStartButtonRefreshTimers();
       if (this._schedulerLockRefreshTimer) {
         clearTimeout(this._schedulerLockRefreshTimer);
         this._schedulerLockRefreshTimer = null;
+      }
+      if (this._sliderStyleRefreshTimer) {
+        clearTimeout(this._sliderStyleRefreshTimer);
+        this._sliderStyleRefreshTimer = null;
       }
       if (this._bubbleHeaderCard?.timer) {
         clearInterval(this._bubbleHeaderCard.timer);
@@ -199,6 +238,9 @@
       }
 
       this._resolved = resolved;
+      this._lastBoostActiveState = this._hass?.states?.[
+        resolved.boostActiveEntityId
+      ]?.state ?? null;
       window.__thermostatBoostCardLastResolved = resolved;
       this._renderCards(resolved);
     }
@@ -271,6 +313,7 @@
         .replace(/[^a-z0-9]+/g, "_")
         .replace(/^_+|_+$/g, "");
       const navAnchor = navSlug ? `#${navSlug}_detail` : "#detail";
+      this._popupHash = navAnchor;
       const useSchedulerComponentCard =
         this._config?.use_scheduler_component_card !== false;
       const showInlinePopupPreview = this._isInCardEditorPreview();
@@ -375,14 +418,10 @@
         },
         styles: `
           \${(() => {
-            const container = card.querySelector(
-              '${countdownSubButtonClass} .bubble-sub-button-name-container'
-            );
+            const selector =
+              '${countdownSubButtonClass} .bubble-sub-button-name-container';
+            let container = card.querySelector(selector);
             if (!container) return '';
-
-            const finishEntity = hass.states['${resolved.boostFinishEntityId}'];
-            const activeEntity = hass.states['${resolved.boostActiveEntityId}'];
-            const isActive = activeEntity?.state === 'on';
 
             const normalizeDate = (value) => {
               if (!value || typeof value !== 'string') return null;
@@ -398,10 +437,22 @@
             };
 
             const update = () => {
+              const currentHass =
+                document.querySelector('home-assistant')?.hass ||
+                card.hass ||
+                hass;
+              if (!currentHass) return;
+              if (!container || !container.isConnected) {
+                container = card.querySelector(selector);
+              }
+              if (!container) return;
+              const activeEntity = currentHass.states['${resolved.boostActiveEntityId}'];
+              const isActive = activeEntity?.state === 'on';
               if (!isActive) {
                 container.innerText = 'Inactive';
                 return;
               }
+              const finishEntity = currentHass.states['${resolved.boostFinishEntityId}'];
               const endIso =
                 finishEntity?.state ||
                 finishEntity?.attributes?.end_time ||
@@ -422,15 +473,6 @@
               const ss = String(seconds).padStart(2, '0');
               container.innerText = \`\${hh}:\${mm}:\${ss}\`;
             };
-
-            if (!isActive) {
-              if (card.timer) {
-                clearInterval(card.timer);
-                card.timer = null;
-              }
-              container.innerText = 'Inactive';
-              return '';
-            }
 
             if (!card.timer) {
               card.timer = setInterval(update, 1000);
@@ -629,11 +671,6 @@
               entity: resolved.boostActiveEntityId,
               state: "off",
             },
-            {
-              condition: "numeric_state",
-              entity: resolved.boostTimeEntityId,
-              above: 0,
-            },
           ],
           card: {
             type: "horizontal-stack",
@@ -659,6 +696,12 @@
                   service_data: {
                     device_id: resolved.deviceId,
                   },
+                },
+                hold_action: {
+                  action: "none",
+                },
+                double_tap_action: {
+                  action: "none",
                 },
               },
             ],
@@ -713,6 +756,15 @@
       this._ensureMainStack();
     }
 
+    _isPopupOpen() {
+      if (!this._popupHash) return false;
+      try {
+        return window?.location?.hash === this._popupHash;
+      } catch (_err) {
+        return false;
+      }
+    }
+
     async _getCardHelpers() {
       if (this._helpers) return this._helpers;
       if (!window.loadCardHelpers) return null;
@@ -733,10 +785,114 @@
         this._bubbleHeaderCard = bubbleCard;
         if (this._hass) this._bubbleHeaderCard.hass = this._hass;
       }
+      if (this._hass) stackCard.hass = this._hass;
       this._root.append(stackCard);
       this._mainStack = stackCard;
-      if (this._hass) this._mainStack.hass = this._hass;
       this._scheduleSchedulerLockRefresh();
+      this._queueMainStartButtonStateRefresh();
+    }
+
+    _queueMainStartButtonStateRefresh() {
+      if (this._mainStartButtonRefreshTimer) {
+        clearTimeout(this._mainStartButtonRefreshTimer);
+      }
+      this._clearMainStartButtonRefreshTimers();
+      this._mainStartButtonRefreshTimer = setTimeout(() => {
+        this._mainStartButtonRefreshTimer = null;
+        this._applyMainStartButtonDisabledState();
+      }, 0);
+      [100, 300, 800].forEach((delay) => {
+        const timer = setTimeout(() => {
+          this._mainStartButtonRefreshTimers = this._mainStartButtonRefreshTimers.filter(
+            (entry) => entry !== timer
+          );
+          this._applyMainStartButtonDisabledState();
+        }, delay);
+        this._mainStartButtonRefreshTimers.push(timer);
+      });
+    }
+
+    _applyMainStartButtonDisabledState() {
+      const resolved = this._resolved;
+      if (!resolved?.boostTimeEntityId || !this._hass) return;
+      const stateObj = this._hass.states[resolved.boostTimeEntityId];
+      const raw = stateObj?.state;
+      const value = raw === undefined || raw === null ? NaN : Number(raw);
+      const disabled = !Number.isFinite(value) || value <= 0;
+      const action = disabled
+        ? { action: "none" }
+        : {
+            action: "call-service",
+            service: `${DOMAIN}.start_boost`,
+            service_data: {
+              device_id: resolved.deviceId,
+            },
+          };
+      const tiles = this._queryDeepAllFrom(this._root, "hui-tile-card");
+      for (const tile of tiles) {
+        const tileName = tile?._config?.name || tile?.config?.name || "";
+        if (tileName !== "Start Boost") continue;
+        this._setTileAction(tile, action);
+        this._setTileDisabledVisual(tile, disabled, MAIN_BOOST_DISABLED_TOOLTIP);
+      }
+    }
+
+    _setTileDisabledVisual(tile, disabled, tooltip) {
+      const tileVisual = this._findTileVisualTarget(tile);
+      const card = tile.shadowRoot?.querySelector?.("ha-card");
+      const targets = [tile, tileVisual, card].filter(Boolean);
+      for (const target of targets) {
+        if (!target?.style) continue;
+        target.style.opacity = disabled ? DISABLED_BUTTON_OPACITY : "";
+        target.style.cursor = disabled ? "not-allowed" : "";
+      }
+      for (const target of targets) {
+        if (!target?.setAttribute || !target?.removeAttribute) continue;
+        if (disabled) {
+          target.setAttribute("title", tooltip);
+        } else {
+          target.removeAttribute("title");
+        }
+      }
+    }
+
+    _setTileAction(tile, startAction) {
+      const current = tile?._config || tile?.config;
+      if (!current) return;
+      const currentAction = current.tap_action?.action;
+      if (currentAction === startAction.action) return;
+      const nextConfig = {
+        ...current,
+        tap_action: startAction,
+        icon_tap_action: startAction,
+      };
+      if (typeof tile.setConfig === "function") {
+        tile.setConfig(nextConfig);
+        return;
+      }
+      tile._config = nextConfig;
+      tile.config = nextConfig;
+      if (typeof tile.requestUpdate === "function") {
+        tile.requestUpdate();
+      }
+    }
+
+    _clearMainStartButtonRefreshTimers() {
+      for (const timer of this._mainStartButtonRefreshTimers) {
+        clearTimeout(timer);
+      }
+      this._mainStartButtonRefreshTimers = [];
+    }
+
+    _findTileVisualTarget(tile) {
+      if (!tile?.shadowRoot?.querySelector) return tile;
+      return (
+        tile.shadowRoot.querySelector("ha-card") ||
+        tile.shadowRoot.querySelector(".container") ||
+        tile.shadowRoot.querySelector("#container") ||
+        tile.shadowRoot.querySelector(".content") ||
+        tile
+      );
     }
 
     _isScheduleOverrideOn() {
@@ -967,61 +1123,20 @@
     }
 
     _scheduleSchedulerLockRefresh() {
-      if (!this._useSchedulerComponentCard()) {
-        this.style.cursor = "";
-        if (this._schedulerLockRefreshTimer) {
-          clearTimeout(this._schedulerLockRefreshTimer);
-          this._schedulerLockRefreshTimer = null;
-        }
-        this._applySliderStateStyles();
-        return;
-      }
       this._applySchedulerLockState();
-      this._applySliderStateStyles();
       if (this._schedulerLockRefreshTimer) {
         clearTimeout(this._schedulerLockRefreshTimer);
       }
       // Re-apply a few times because scheduler-card internals can mount asynchronously.
       this._schedulerLockRefreshTimer = setTimeout(() => {
         this._applySchedulerLockState();
-        this._applySliderStateStyles();
       }, 100);
       setTimeout(() => {
         this._applySchedulerLockState();
-        this._applySliderStateStyles();
       }, 300);
       setTimeout(() => {
         this._applySchedulerLockState();
-        this._applySliderStateStyles();
       }, 800);
-    }
-
-    _applySliderStateStyles() {
-      const targetEntities = [
-        this._resolved?.boostTemperatureEntityId,
-        this._resolved?.boostTimeEntityId,
-      ].filter(Boolean);
-      if (targetEntities.length === 0) return;
-
-      const candidates = this._queryDeepAll(".state, .value");
-      for (const node of candidates) {
-        if (!node?.style) continue;
-        const path = [];
-        let current = node;
-        while (current) {
-          path.push(current);
-          current = current.parentNode || current.host || null;
-        }
-        const inTargetSlider = targetEntities.some((entityId) =>
-          this._pathContainsEntity(path, entityId)
-        );
-        if (!inTargetSlider) continue;
-
-        node.style.whiteSpace = "nowrap";
-        node.style.minWidth = SLIDER_STATE_MIN_WIDTH;
-        node.style.textAlign = "right";
-        node.style.display = "inline-block";
-      }
     }
 
     _applySchedulerLockState() {
@@ -1399,6 +1514,656 @@
     }
   }
 
+  class ThermostatBoostAllCard extends HTMLElement {
+    constructor() {
+      super();
+      this.attachShadow({ mode: "open" });
+      this._hass = null;
+      this._config = null;
+      this._helpers = null;
+      this._stackConfig = null;
+      this._stackCard = null;
+      this._devices = [];
+      this._loading = false;
+      this._error = "";
+      this._tempDelta = 0;
+      this._hours = 0;
+      this._sliderStyleRefreshTimer = null;
+      this._startButtonRefreshTimer = null;
+      this._startButtonRefreshTimers = [];
+
+      const style = document.createElement("style");
+      style.textContent = `
+        .stack {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+        .message {
+          padding: 12px;
+          color: var(--secondary-text-color);
+        }
+      `;
+
+      this._root = document.createElement("div");
+      this._root.classList.add("stack");
+      this._message = document.createElement("div");
+      this._message.classList.add("message");
+      this._root.append(this._message);
+      this.shadowRoot.append(style, this._root);
+    }
+
+    static getStubConfig() {
+      return {
+        type: `custom:${ALL_CARD_TYPE}`,
+      };
+    }
+
+    getCardSize() {
+      return 4;
+    }
+
+    setConfig(config) {
+      this._config = { ...(config || {}) };
+      this._renderMessage("Loading Thermostat Boost devices...");
+      this._ensureResolved();
+    }
+
+    set hass(hass) {
+      this._hass = hass;
+      if (this._stackCard) this._stackCard.hass = this._createProxyHass();
+      this._queueStartButtonStateRefresh();
+      this._ensureResolved();
+    }
+
+    disconnectedCallback() {
+      if (this._sliderStyleRefreshTimer) {
+        clearTimeout(this._sliderStyleRefreshTimer);
+        this._sliderStyleRefreshTimer = null;
+      }
+      if (this._startButtonRefreshTimer) {
+        clearTimeout(this._startButtonRefreshTimer);
+        this._startButtonRefreshTimer = null;
+      }
+      this._clearStartButtonRefreshTimers();
+    }
+
+    _renderMessage(text) {
+      this._message.textContent = text;
+      if (!this._root.contains(this._message)) {
+        this._root.innerHTML = "";
+        this._root.append(this._message);
+      }
+    }
+
+    async _getCardHelpers() {
+      if (this._helpers) return this._helpers;
+      if (!window.loadCardHelpers) return null;
+      this._helpers = await window.loadCardHelpers();
+      return this._helpers;
+    }
+
+    _isVirtualEntity(entityId) {
+      return (
+        entityId === "number.thermostat_boost_all_temperature_offset" ||
+        entityId === "number.thermostat_boost_all_time_selector"
+      );
+    }
+
+    _toStateString(value) {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return "0";
+      return Number.isInteger(num) ? String(num) : String(num);
+    }
+
+    _temperatureDeltaConfig() {
+      const rawUnit = this._hass?.config?.unit_system?.temperature || "";
+      const normalized = String(rawUnit).toUpperCase();
+      const isFahrenheit = normalized.includes("F");
+      return {
+        unit: isFahrenheit ? "\u00B0F" : "\u00B0C",
+        min: isFahrenheit ? -10 : -5,
+        max: isFahrenheit ? 10 : 5,
+      };
+    }
+
+    async _ensureResolved() {
+      if (!this._hass || this._loading) return;
+      this._loading = true;
+      try {
+        const [devices, entities] = await Promise.all([
+          this._hass.callWS({ type: "config/device_registry/list" }),
+          this._hass.callWS({ type: "config/entity_registry/list" }),
+        ]);
+        this._devices = devices
+          .filter((device) => {
+            const domainIdentifiers = (device.identifiers || []).filter(
+              (identifier) => identifier[0] === DOMAIN
+            );
+            if (domainIdentifiers.length === 0) return false;
+            return !domainIdentifiers.some(
+              (identifier) => identifier[1] === CALL_FOR_HEAT_AGGREGATE_ID
+            );
+          })
+          .map((device) => {
+            const deviceId = device.id;
+            const thermostatEntityId = findThermostatEntityId(device);
+            return {
+              deviceId,
+              label: computeLabel(device),
+              thermostatEntityId,
+              boostActiveEntityId: findEntityId(
+                entities,
+                deviceId,
+                BOOST_ACTIVE_SUFFIX,
+                "binary_sensor"
+              ),
+              boostFinishEntityId: findEntityId(
+                entities,
+                deviceId,
+                BOOST_FINISH_SUFFIX
+              ),
+            };
+          })
+          .filter(
+            (device) =>
+              Boolean(device.deviceId) &&
+              Boolean(device.thermostatEntityId) &&
+              Boolean(device.boostActiveEntityId) &&
+              Boolean(device.boostFinishEntityId)
+          );
+        this._error = "";
+      } catch (_err) {
+        this._error = "Unable to resolve Thermostat Boost devices.";
+      } finally {
+        this._loading = false;
+        this._renderStack();
+      }
+    }
+
+    _getActiveDevices() {
+      if (!this._hass) return [];
+      return this._devices.filter(
+        (device) => this._hass.states[device.boostActiveEntityId]?.state === "on"
+      );
+    }
+
+    _getCountdownText() {
+      if (!this._hass) return null;
+      const activeDevices = this._getActiveDevices();
+      if (activeDevices.length === 0) return null;
+
+      const endTimestamps = activeDevices
+        .map((device) => {
+          const finishState = this._hass.states[device.boostFinishEntityId];
+          const raw =
+            finishState?.state || finishState?.attributes?.end_time || null;
+          return parseTimestamp(raw);
+        })
+        .filter((value) => !Number.isNaN(value));
+      if (endTimestamps.length === 0) return null;
+      const maxEnd = Math.max(...endTimestamps);
+      return new Date(maxEnd).toISOString();
+    }
+
+
+    _hoursToDuration(hoursValue) {
+      const totalMinutes = Math.max(0, Math.round(Number(hoursValue) * 60));
+      return {
+        hours: Math.floor(totalMinutes / 60),
+        minutes: totalMinutes % 60,
+      };
+    }
+
+    async _handleStart() {
+      if (!this._hass) return;
+      const duration = this._hoursToDuration(this._hours);
+      const totalMinutes = duration.hours * 60 + duration.minutes;
+      if (totalMinutes <= 0 || this._tempDelta === 0) return;
+
+      const deviceIds = this._devices.map((device) => device.deviceId).filter(Boolean);
+      if (deviceIds.length === 0) {
+        this._error = "No eligible thermostats found for all-boost start.";
+        this._renderStack();
+        return;
+      }
+
+      this._error = "";
+      try {
+        await this._hass.callService(DOMAIN, "start_boost", {
+          device_id: deviceIds,
+          time: duration,
+          temperature_delta: this._tempDelta,
+        });
+        // Reset sliders after a successful start.
+        this._tempDelta = 0;
+        this._hours = 0;
+        if (this._stackCard) {
+          this._stackCard.hass = this._createProxyHass();
+          this._queueStartButtonStateRefresh();
+        } else {
+          await this._renderStack();
+        }
+      } catch (_err) {
+        this._error = "Failed to start all thermostats boost.";
+        this._renderStack();
+      }
+    }
+
+    async _handleCancel() {
+      if (!this._hass) return;
+      const activeDeviceIds = this._getActiveDevices().map(
+        (device) => device.deviceId
+      );
+      if (activeDeviceIds.length === 0) return;
+
+      this._error = "";
+      try {
+        await this._hass.callService(DOMAIN, "finish_boost", {
+          device_id: activeDeviceIds,
+        });
+      } catch (_err) {
+        this._error = "Failed to cancel active boosts.";
+        this._renderStack();
+      }
+    }
+
+    _virtualStates() {
+      const tempConfig = this._temperatureDeltaConfig();
+      const finishIso = this._getCountdownText();
+      return {
+        "number.thermostat_boost_all_temperature_offset": {
+          entity_id: "number.thermostat_boost_all_temperature_offset",
+          state: this._toStateString(this._tempDelta),
+          attributes: {
+            friendly_name: "All Thermostats Temperature Offset",
+            min: tempConfig.min,
+            max: tempConfig.max,
+            step: 0.5,
+            unit_of_measurement: tempConfig.unit,
+          },
+        },
+        "number.thermostat_boost_all_time_selector": {
+          entity_id: "number.thermostat_boost_all_time_selector",
+          state: this._toStateString(this._hours),
+          attributes: {
+            friendly_name: "All Thermostats Boost Duration",
+            min: 0,
+            max: 24,
+            step: 0.5,
+            unit_of_measurement: "hrs",
+          },
+        },
+        "sensor.thermostat_boost_all_finish": {
+          entity_id: "sensor.thermostat_boost_all_finish",
+          state: finishIso || "Inactive",
+          attributes: {
+            friendly_name: "All Thermostats Boost Finish",
+            end_time: finishIso || null,
+          },
+        },
+      };
+    }
+
+    _createProxyHass() {
+      if (!this._hass) return null;
+      const states = {
+        ...this._hass.states,
+        ...this._virtualStates(),
+      };
+      return {
+        ...this._hass,
+        states,
+        callService: async (domain, service, serviceData, target) => {
+          if (domain === "number" && service === "set_value") {
+            const entityId = serviceData?.entity_id;
+            if (this._isVirtualEntity(entityId)) {
+              const raw = Number(serviceData?.value);
+              if (!Number.isFinite(raw)) return;
+              const tempConfig = this._temperatureDeltaConfig();
+              if (entityId === "number.thermostat_boost_all_temperature_offset") {
+                this._tempDelta = Math.max(tempConfig.min, Math.min(tempConfig.max, raw));
+              } else if (entityId === "number.thermostat_boost_all_time_selector") {
+                this._hours = Math.max(0, Math.min(24, raw));
+              }
+              if (this._stackCard) {
+                this._stackCard.hass = this._createProxyHass();
+                this._queueStartButtonStateRefresh();
+              } else {
+                await this._renderStack();
+              }
+              return;
+            }
+          }
+
+          if (
+            domain === DOMAIN &&
+            service === "start_boost" &&
+            serviceData?.device_id === "__all_thermostat_boost_devices__"
+          ) {
+            await this._handleStart();
+            return;
+          }
+          if (
+            domain === DOMAIN &&
+            service === "finish_boost" &&
+            serviceData?.device_id === "__all_thermostat_boost_devices__"
+          ) {
+            await this._handleCancel();
+            return;
+          }
+          return this._hass.callService(domain, service, serviceData, target);
+        },
+      };
+    }
+
+    _buildStackConfig() {
+      const startAction = {
+        action: "call-service",
+        service: `${DOMAIN}.start_boost`,
+        service_data: {
+          device_id: "__all_thermostat_boost_devices__",
+        },
+      };
+      const cards = [
+        {
+          type: "vertical-stack",
+          cards: [
+            {
+              type: "custom:slider-entity-row",
+              entity: "number.thermostat_boost_all_temperature_offset",
+              name: "Boost Temperature Offset",
+              full_row: true,
+              show_icon: true,
+              step: 0.5,
+              toggle: false,
+              hide_state: false,
+              icon: "mdi:thermometer",
+            },
+            {
+              type: "custom:slider-entity-row",
+              entity: "number.thermostat_boost_all_time_selector",
+              name: "Boost Duration",
+              full_row: true,
+              show_icon: true,
+              toggle: false,
+              hide_when_off: false,
+              hide_state: false,
+              icon: "mdi:av-timer",
+            },
+          ],
+        },
+        {
+          type: "horizontal-stack",
+          cards: [
+            {
+              type: "tile",
+              color: "green",
+              name: "Start boost on all thermostats",
+              hide_state: true,
+              vertical: false,
+              icon: "mdi:rocket-launch",
+              entity: "sensor.thermostat_boost_all_finish",
+              tap_action: startAction,
+              icon_tap_action: startAction,
+              hold_action: {
+                action: "none",
+              },
+              double_tap_action: {
+                action: "none",
+              },
+            },
+          ],
+        },
+        {
+          type: "custom:thermostat-boost-divider",
+        },
+        {
+          type: "horizontal-stack",
+          cards: [
+            {
+              type: "tile",
+              entity: "sensor.thermostat_boost_all_finish",
+              tap_action: {
+                action: "call-service",
+                service: `${DOMAIN}.finish_boost`,
+                service_data: {
+                  device_id: "__all_thermostat_boost_devices__",
+                },
+              },
+              icon_tap_action: {
+                action: "call-service",
+                service: `${DOMAIN}.finish_boost`,
+                service_data: {
+                  device_id: "__all_thermostat_boost_devices__",
+                },
+              },
+              color: "red",
+              name: "Cancel boost on all thermostats",
+              hide_state: true,
+              icon: "mdi:rocket",
+            },
+          ],
+        },
+      ];
+
+      if (this._error) {
+        cards.push({
+          type: "markdown",
+          content: `**Error:** ${this._error}`,
+        });
+      }
+      return {
+        type: "vertical-stack",
+        cards,
+      };
+    }
+
+    async _renderStack() {
+      if (!this._hass) {
+        this._renderMessage("Waiting for Home Assistant...");
+        return;
+      }
+      if (this._loading) {
+        this._renderMessage("Loading Thermostat Boost devices...");
+        return;
+      }
+      if (this._error && this._devices.length === 0) {
+        this._renderMessage(this._error);
+        return;
+      }
+      if (this._devices.length === 0) {
+        this._renderMessage("No Thermostat Boost devices found.");
+        return;
+      }
+
+      this._stackConfig = this._buildStackConfig();
+      const helpers = await this._getCardHelpers();
+      if (!helpers) {
+        this._renderMessage("Unable to load card helpers.");
+        return;
+      }
+
+      const nextCard = await helpers.createCardElement(this._stackConfig);
+      const proxiedHass = this._createProxyHass();
+      if (proxiedHass) nextCard.hass = proxiedHass;
+
+      this._root.innerHTML = "";
+      this._root.append(nextCard);
+      this._stackCard = nextCard;
+      this._queueStartButtonStateRefresh();
+    }
+
+    _queueStartButtonStateRefresh() {
+      if (this._startButtonRefreshTimer) {
+        clearTimeout(this._startButtonRefreshTimer);
+      }
+      this._clearStartButtonRefreshTimers();
+      this._startButtonRefreshTimer = setTimeout(() => {
+        this._startButtonRefreshTimer = null;
+        this._applyStartButtonDisabledState();
+      }, 0);
+      [100, 300, 800].forEach((delay) => {
+        const timer = setTimeout(() => {
+          this._startButtonRefreshTimers = this._startButtonRefreshTimers.filter(
+            (entry) => entry !== timer
+          );
+          this._applyStartButtonDisabledState();
+        }, delay);
+        this._startButtonRefreshTimers.push(timer);
+      });
+    }
+
+    _setTileDisabledVisual(tile, disabled, tooltip) {
+      const tileVisual = this._findTileVisualTarget(tile);
+      const card = tile.shadowRoot?.querySelector?.("ha-card");
+      const targets = [tile, tileVisual, card].filter(Boolean);
+      for (const target of targets) {
+        if (!target?.style) continue;
+        target.style.opacity = disabled ? DISABLED_BUTTON_OPACITY : "";
+        target.style.cursor = disabled ? "not-allowed" : "";
+      }
+      for (const target of targets) {
+        if (!target?.setAttribute || !target?.removeAttribute) continue;
+        if (disabled) {
+          target.setAttribute("title", tooltip);
+        } else {
+          target.removeAttribute("title");
+        }
+      }
+    }
+
+    _applyStartButtonDisabledState() {
+      const disabled = this._hours <= 0 || this._tempDelta === 0;
+      const cancelDisabled = this._getActiveDevices().length === 0;
+      const startAction = disabled
+        ? { action: "none" }
+        : {
+            action: "call-service",
+            service: `${DOMAIN}.start_boost`,
+            service_data: {
+              device_id: "__all_thermostat_boost_devices__",
+            },
+          };
+      const cancelAction = cancelDisabled
+        ? { action: "none" }
+        : {
+            action: "call-service",
+            service: `${DOMAIN}.finish_boost`,
+            service_data: {
+              device_id: "__all_thermostat_boost_devices__",
+            },
+          };
+      const tiles = this._queryDeepAllFrom(this._root, "hui-tile-card");
+      for (const tile of tiles) {
+        const tileName = tile?._config?.name || tile?.config?.name || "";
+        if (tileName === "Start boost on all thermostats") {
+          this._setTileAction(tile, startAction);
+          this._setTileDisabledVisual(tile, disabled, ALL_BOOST_DISABLED_TOOLTIP);
+          continue;
+        }
+        if (tileName === "Cancel boost on all thermostats") {
+          this._setTileAction(tile, cancelAction);
+          this._setTileDisabledVisual(
+            tile,
+            cancelDisabled,
+            ALL_BOOST_CANCEL_DISABLED_TOOLTIP
+          );
+        }
+      }
+    }
+    _setTileAction(tile, startAction) {
+      const current = tile?._config || tile?.config;
+      if (!current) return;
+      const currentAction = current.tap_action?.action;
+      if (currentAction === startAction.action) return;
+      const nextConfig = {
+        ...current,
+        tap_action: startAction,
+        icon_tap_action: startAction,
+      };
+      if (typeof tile.setConfig === "function") {
+        tile.setConfig(nextConfig);
+        return;
+      }
+      tile._config = nextConfig;
+      tile.config = nextConfig;
+      if (typeof tile.requestUpdate === "function") {
+        tile.requestUpdate();
+      }
+    }
+
+    _clearStartButtonRefreshTimers() {
+      for (const timer of this._startButtonRefreshTimers) {
+        clearTimeout(timer);
+      }
+      this._startButtonRefreshTimers = [];
+    }
+
+    _findTileVisualTarget(tile) {
+      if (!tile?.shadowRoot?.querySelector) return tile;
+      return (
+        tile.shadowRoot.querySelector("ha-card") ||
+        tile.shadowRoot.querySelector(".container") ||
+        tile.shadowRoot.querySelector("#container") ||
+        tile.shadowRoot.querySelector(".content") ||
+        tile
+      );
+    }
+
+    _queryDeepAllFrom(root, selector) {
+      const results = [];
+      const visit = (node) => {
+        if (!node) return;
+        if (node.querySelectorAll) {
+          const found = node.querySelectorAll(selector);
+          for (let i = 0; i < found.length; i += 1) {
+            results.push(found[i]);
+          }
+        }
+
+        const children = node.children || [];
+        for (let i = 0; i < children.length; i += 1) {
+          visit(children[i]);
+          if (children[i].shadowRoot) {
+            visit(children[i].shadowRoot);
+          }
+        }
+        if (node.shadowRoot) {
+          visit(node.shadowRoot);
+        }
+      };
+
+      visit(root);
+      return results;
+    }
+  }
+
+  class ThermostatBoostDividerCard extends HTMLElement {
+    constructor() {
+      super();
+      this.attachShadow({ mode: "open" });
+      const style = document.createElement("style");
+      style.textContent = `
+        .divider {
+          border: 0;
+          border-top: 1px solid var(--primary-text-color);
+          opacity: 0.7;
+          margin: 8px 0;
+        }
+      `;
+      const hr = document.createElement("hr");
+      hr.classList.add("divider");
+      this.shadowRoot.append(style, hr);
+    }
+
+    setConfig(_config) {}
+    set hass(_hass) {}
+    getCardSize() {
+      return 1;
+    }
+  }
+
   class ThermostatBoostCardEditor extends HTMLElement {
     constructor() {
       super();
@@ -1651,8 +2416,17 @@
       ThermostatBoostCountdownCard
     );
   }
+  if (!customElements.get("thermostat-boost-divider")) {
+    customElements.define(
+      "thermostat-boost-divider",
+      ThermostatBoostDividerCard
+    );
+  }
   if (!customElements.get("thermostat-boost-card-editor")) {
     customElements.define("thermostat-boost-card-editor", ThermostatBoostCardEditor);
+  }
+  if (!customElements.get(ALL_CARD_TYPE)) {
+    customElements.define(ALL_CARD_TYPE, ThermostatBoostAllCard);
   }
 
   window.customCards = window.customCards || [];
@@ -1661,6 +2435,13 @@
       type: CARD_TYPE,
       name: "Thermostat Boost",
       description: "Thermostat overview card and boost controls overlay",
+    });
+  }
+  if (!window.customCards.some((card) => card.type === ALL_CARD_TYPE)) {
+    window.customCards.push({
+      type: ALL_CARD_TYPE,
+      name: "All Thermostats Boost",
+      description: "Start/cancel boost for all Thermostat Boost devices",
     });
   }
 

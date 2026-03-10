@@ -72,6 +72,7 @@ _START_BOOST_SERVICE_SCHEMA = vol.Schema(
             },
         ),
         vol.Optional("temperature"): vol.Coerce(float),
+        vol.Optional("temperature_delta"): vol.Coerce(float),
     },
     extra=vol.ALLOW_EXTRA,
 )
@@ -132,12 +133,40 @@ async def async_setup_entry(
                 if not entry_ids:
                     raise HomeAssistantError("start_boost requires device_id.")
 
+                requested_temperature = call.data.get("temperature")
+                temperature_delta = call.data.get("temperature_delta")
+                if requested_temperature is not None and temperature_delta is not None:
+                    raise HomeAssistantError(
+                        "temperature and temperature_delta cannot both be provided."
+                    )
+
                 for resolved_entry_id in entry_ids:
+                    resolved_temperature = requested_temperature
+                    if temperature_delta is not None:
+                        entry_data = hass.data.get(DOMAIN, {}).get(resolved_entry_id)
+                        if (
+                            not isinstance(entry_data, dict)
+                            or CONF_THERMOSTAT not in entry_data
+                        ):
+                            raise HomeAssistantError(
+                                f"No thermostat data found for {resolved_entry_id}."
+                            )
+                        base_temperature = _get_thermostat_target_temperature(
+                            hass, entry_data[CONF_THERMOSTAT]
+                        )
+                        if base_temperature is None:
+                            raise HomeAssistantError(
+                                "Unable to determine current thermostat target "
+                                f"temperature for {entry_data[CONF_THERMOSTAT]}."
+                            )
+                        resolved_temperature = float(base_temperature) + float(
+                            temperature_delta
+                        )
                     await async_start_boost_for_entry(
                         hass,
                         resolved_entry_id,
                         time=call.data.get("time"),
-                        temperature=call.data.get("temperature"),
+                        temperature=resolved_temperature,
                     )
 
             hass.services.async_register(
@@ -292,6 +321,20 @@ def _get_number_value(
         return None
 
 
+@callback
+def _get_thermostat_target_temperature(
+    hass: HomeAssistant, thermostat_entity_id: str
+) -> float | None:
+    state = hass.states.get(thermostat_entity_id)
+    if state is None or state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+        return None
+    value = state.attributes.get("temperature")
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _normalize_to_list(value) -> list[str]:
     if value is None:
         return []
@@ -370,6 +413,9 @@ def _async_update_start_boost_service_schema(hass: HomeAssistant) -> None:
         return
 
     min_temp, max_temp, unit = _service_temperature_selector_config(hass)
+    is_fahrenheit = unit == UnitOfTemperature.FAHRENHEIT
+    offset_min = -10 if is_fahrenheit else -5
+    offset_max = 10 if is_fahrenheit else 5
     async_set_service_schema(
         hass,
         DOMAIN,
@@ -415,6 +461,23 @@ def _async_update_start_boost_service_schema(hass: HomeAssistant) -> None:
                         "number": {
                             "min": min_temp,
                             "max": max_temp,
+                            "step": 0.5,
+                            "mode": "slider",
+                            "unit_of_measurement": unit,
+                        }
+                    },
+                },
+                "temperature_delta": {
+                    "name": "Temperature Offset",
+                    "description": (
+                        "Optional. Adds this offset to each thermostat's current target "
+                        "temperature before starting boost."
+                    ),
+                    "example": 2,
+                    "selector": {
+                        "number": {
+                            "min": offset_min,
+                            "max": offset_max,
                             "step": 0.5,
                             "mode": "slider",
                             "unit_of_measurement": unit,
