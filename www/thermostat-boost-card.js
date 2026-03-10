@@ -1524,6 +1524,7 @@
       this._stackCard = null;
       this._devices = [];
       this._loading = false;
+      this._needsDeviceRefresh = true;
       this._error = "";
       this._tempDelta = 0;
       this._hours = 0;
@@ -1565,6 +1566,7 @@
 
     setConfig(config) {
       this._config = { ...(config || {}) };
+      this._needsDeviceRefresh = true;
       this._renderMessage("Loading Thermostat Boost devices...");
       this._ensureResolved();
     }
@@ -1625,6 +1627,9 @@
 
     async _ensureResolved() {
       if (!this._hass || this._loading) return;
+      if (!this._needsDeviceRefresh && this._devices.length > 0 && this._stackCard) {
+        return;
+      }
       this._loading = true;
       try {
         const [devices, entities] = await Promise.all([
@@ -1669,8 +1674,10 @@
               Boolean(device.boostFinishEntityId)
           );
         this._error = "";
+        this._needsDeviceRefresh = false;
       } catch (_err) {
         this._error = "Unable to resolve Thermostat Boost devices.";
+        this._needsDeviceRefresh = true;
       } finally {
         this._loading = false;
         this._renderStack();
@@ -1863,13 +1870,20 @@
     }
 
     _buildStackConfig() {
-      const startAction = {
-        action: "call-service",
-        service: `${DOMAIN}.start_boost`,
-        service_data: {
-          device_id: "__all_thermostat_boost_devices__",
-        },
-      };
+      const disabled =
+        this._hours <= 0 ||
+        this._tempDelta === 0 ||
+        !this._selectedDeviceIds ||
+        this._selectedDeviceIds.length === 0;
+      const startAction = disabled
+        ? { action: "none" }
+        : {
+            action: "call-service",
+            service: `${DOMAIN}.start_boost`,
+            service_data: {
+              device_id: "__all_thermostat_boost_devices__",
+            },
+          };
       const devicePickerCard = {
         type: "custom:thermostat-boost-device-picker",
         devices: this._devices.map((device) => {
@@ -1993,7 +2007,7 @@
         this._startButtonRefreshTimer = null;
         this._applyStartButtonDisabledState();
       }, 0);
-      [100, 300, 800].forEach((delay) => {
+      [200].forEach((delay) => {
         const timer = setTimeout(() => {
           this._startButtonRefreshTimers = this._startButtonRefreshTimers.filter(
             (entry) => entry !== timer
@@ -2187,13 +2201,16 @@
     }
 
     _buildStackConfig() {
-      const cancelAction = {
-        action: "call-service",
-        service: `${DOMAIN}.finish_boost`,
-        service_data: {
-          device_id: "__all_thermostat_boost_devices__",
-        },
-      };
+      const cancelDisabled = this._getActiveDevices().length === 0;
+      const cancelAction = cancelDisabled
+        ? { action: "none" }
+        : {
+            action: "call-service",
+            service: `${DOMAIN}.finish_boost`,
+            service_data: {
+              device_id: "__all_thermostat_boost_devices__",
+            },
+          };
       const cards = [
         {
           type: "horizontal-stack",
