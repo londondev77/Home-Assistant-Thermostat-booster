@@ -2,7 +2,7 @@
 
 ## Intro
 
-**I developed Thermostat Boost to allow me to temporarily set the temperature of Generic Thermostats (although I suspect it will work with other kinds too - it does for Nests).  When the temporary boost expires, the thermostat reverts to either the last temperature it was set to, or the current schedule if one is defined and is turned on.**
+**I developed Thermostat Boost to allow me to temporarily set the temperature of Generic Thermostats (although it should work with any climate thermostat).  When the temporary boost expires, the thermostat reverts to either the last temperature it was set to, or the current schedule (more details on Scheduler integration below) if one is defined and is turned on.**
 
 Previously, I had developed a series of automations to achieve this which involved creating numerous helpers for each instance. Adding a new thermostat took some time to do. I wanted to see if I could streamline this as well as test how well ChatGPT could code as this is well beyond my capabilities.
 
@@ -10,19 +10,28 @@ This integration has been designed around my own use case.  I'm happy to take su
 
 A few notes:
  
- - The included dashboard card uses [Bubble Card](https://github.com/Clooos/Bubble-Card), [Scheduler Card](https://github.com/nielsfaber/scheduler-card) (and its associated [Scheduler Component](https://github.com/nielsfaber/scheduler-component)), and [Slider Entity Row](https://github.com/thomasloven/lovelace-slider-entity-row).  I have made the Scheduler card optional but you must have Bubble Card and Slider Entity Row installed.
- - I haven't tested it but this should work for both Celcius and Fahrenheit.
- - Certain logic e.g. not being able to change schedules during boosts is enforced using the included card. I don't know how well the boost will handle it if changes are made outside of the card but I expect it will work.
+ - The included dashboard card uses [Bubble Card](https://github.com/Clooos/Bubble-Card), [Scheduler Card](https://github.com/nielsfaber/scheduler-card) (and its associated [Scheduler Component](https://github.com/nielsfaber/scheduler-component)), and [Slider Entity Row](https://github.com/thomasloven/lovelace-slider-entity-row).  I have made the Scheduler card optional but you must have Bubble Card and Slider Entity Row installed to use the custom cards.
+ - I haven't tested it but this should work for both Celsius and Fahrenheit.
+ - Certain logic e.g. not being able to change schedules during boosts is enforced using the included card. I don't know how well the boost will handle it if changes are made outside of the card but I expect it will work.  
+ - The included services should be hardened sufficiently so that even without using the included custom card and its logic from the above bullet, things should still work.
 
 > [!CAUTION]
-> Because this was developed by ChatGPT, I have no idea if the code is efficient or uses best practice. I've done a fair bit of testing but I may well have missed issues. I've also rearchitected the way it works and haven't had a chance to test so extensively. Use at own risk!
+> Because this was developed by ChatGPT, I have no idea if the code is efficient or uses best practice. I've done a fair bit of testing but I may well have missed issues. I've also rearchitected the way it works a number of times and haven't had a chance to test so extensively. Use at own risk!
+
+### Integration icon
+
+> [!NOTE]
+> Starting from 2026.3, integration icons are now bundled with the integration. Home Assistant is no longer accepting icons the old way so if you're running an older build, this integration won't show a custom icon.
 
 ## Screenshots
-### Thermostats summary
+### Thermostats summary (cancel all button is a separate card to allow placement anywhere)
 ![Thermostats summary](https://raw.githubusercontent.com/londondev77/Home-Assistant-Thermostat-booster/refs/heads/main/screenshots/thermostats-summary.png)
 
 ### Thermostat detail overlay
 ![Thermostat detail overlay](https://raw.githubusercontent.com/londondev77/Home-Assistant-Thermostat-booster/refs/heads/main/screenshots/thermostat-detail-overlay.png)
+
+### Multi-thermostat boost with offset
+![Multi-thermostat boost with offset](https://raw.githubusercontent.com/londondev77/Home-Assistant-Thermostat-booster/refs/heads/main/screenshots/multi-thermostat-boost.png)
 
 ### Integration overview
 ![Integration overview](https://raw.githubusercontent.com/londondev77/Home-Assistant-Thermostat-booster/refs/heads/main/screenshots/integration-overview.png)
@@ -33,6 +42,7 @@ A few notes:
 ## Features
 
 - Fast temporary heat boost (or reduction) without touching your normal schedule setup (if you have one).
+- Can boost one or multiple thermostats either using an absolute temperature or an offset (the included multiple thermostats card only uses an offset but absolute can still be done with the service).
 - Automatic return to scheduled control or previous target temperature when boost ends.
 - Functionality to set certain thermostats to Call for Heat. An aggregate binary sensor can be used in automations to fire the boiler if your setup allows this. I'm not actually using this but I have tested that the feature works as intended.
 - Resilience during Home Assistant restarts or short outages.
@@ -40,11 +50,11 @@ A few notes:
 
 ## Benefits
 
-- **Easy to set up**.  Add the integration to HACS and then set up a new integration per thermostat. Finally add the associated card to your dashboard (or just use the Services).  Everything else should be taken care of.  It should be quick and easy!
-- **Scalable**. Should work with multiple thermostats.
+- **Easy to set up**.  Add the integration to HACS and then set up a new integration per thermostat. Finally add the associated card(s) to your dashboard (or just use the Services).  Everything else should be taken care of.  It should be quick and easy!
+- **Scalable**. Works with multiple thermostats.
 - **Resilient**. Persists across Home Assistant restarts and works even if the boost expires when the server is offline.  This needs further testing as it was difficult to get working properly!
 - **Thought through!** I've tried to take into account all the different scenarios where things can go wrong and ensure the integration doesn't fall over. I've also designed the UI to make sense (to me at least).
-- **Services/Actions available**. If you don't want to use the supplied dashboard card, you should still be able to boost thermostats with the provided Services.
+- **Services/Actions available**. If you don't want to use the supplied dashboard card, you can still be able to boost thermostats with the provided Services.
 
 ## Automatic Installation with HACS
 1. Add this repository to HACS using the following button
@@ -70,8 +80,9 @@ Repeat for each thermostat you want to control.
 
 > [!NOTE]
 > When the first thermostat entry is created, Thermostat Boost also auto-creates a separate device (`Thermostat Boost Call for Heat`) that provides `binary_sensor.thermostat_boost_call_for_heat_active`.
+> This Call for Heat device cannot be deleted manually while thermostats are still configured in Thermostat Boost. It is removed automatically when all Thermostat Boost thermostats are removed.
 
-## Optional Lovelace Card
+## Optional Lovelace Cards
 
 This repository includes `www/thermostat-boost-card.js`, a custom Lovelace card for:
 
@@ -79,7 +90,7 @@ This repository includes `www/thermostat-boost-card.js`, a custom Lovelace card 
 - Boost time/temperature controls
 - Start/cancel actions
 - Countdown display
-- Display/edit/disble schedules
+- Display/edit/disble schedules (this can be turned off if you don't use scheudules)
 - Enforces some logic by disabling elements when they shouldn't be changed e.g. during a boost
 
 > [!NOTE]
@@ -91,7 +102,7 @@ This repository includes `www/thermostat-boost-card.js`, a custom Lovelace card 
 
 ### Adding the Lovelace card to dashboard
 1. Edit dashboard and click add card.
-1. Search for the Thermostat Boost card.
+1. Search for the Thermostat Boost card (card picker name: "Thermostat Boost").
 1. Select the device to add. *Only thermostats you've added to the integration will appear in this list*.
 1. Click save.
 
@@ -102,6 +113,14 @@ This repository includes `www/thermostat-boost-card.js`, a custom Lovelace card 
   - When disabled, both the embedded Scheduler card and `Disable Schedules` switch are hidden.
   - If the selected thermostat already has schedules assigned and this option is disabled, the editor shows a warning recommending that Scheduler card is included to avoid confusion.
 
+### Multiple Thermostat Cards
+There are two additional cards that work across multiple Thermostat Boost devices:
+
+1. `custom:thermostat-boost-all-card` (card picker: "Thermostat Boost - multiple thermostats") - Apply an offset boost to a number of Thermostat Boost devices.
+1. `custom:thermostat-boost-cancel-all-card` (card picker: "Thermostat Boost - cancel all button") - A button to cancel all active boosts for Thermostat Boost devices, separate so you can place it wherever you want.
+
+
+
 ## Dependencies
 
 The full feature set depends on these Home Assistant add-ons/custom cards:
@@ -111,7 +130,7 @@ The full feature set depends on these Home Assistant add-ons/custom cards:
 | Bubble Card | Required if using `www/thermostat-boost-card.js` | The custom card renders with `custom:bubble-card` (header + pop-up views) | https://github.com/Clooos/Bubble-Card |
 | Scheduler Component | Optional | Provides scheduler functionality to the thermostat.  | https://github.com/nielsfaber/scheduler-component |
 | Scheduler Card | Optional | Used to show/edit thermostat schedules created by the Scheduler Component | https://github.com/nielsfaber/scheduler-card |
-| Slider Entity Row | Required if using `www/thermostat-boost-card.js` | Boost time/temperature controls use `custom:slider-entity-row` | https://github.com/thomasloven/lovelace-slider-entity-row |
+| Slider Entity Row | Required if using `www/thermostat-boost-card.js` | Boost time/temperature controls use `custom:slider-entity-row`. I did try using the built-in tile card to do this but I didn't like the way the grabber disappeared when set to minimum - this felt confusing. | https://github.com/thomasloven/lovelace-slider-entity-row |
 
 > [!NOTE]
 > - If you do not use `www/thermostat-boost-card.js`, Bubble Card / Scheduler Card / Slider Entity Row are not required for backend services to run.
@@ -132,7 +151,27 @@ What happens in the background:
 1. On finish, the temperature snapshot is restored followed by scheduler snapshot (and those that are switched on will also be passed to the `scheduler.run_action` service to ensure they're enabled correctly).  The latter will override the temperature snapshot if a schedule is active at that point.
 
 > [!NOTE]
+> Starting a boost while one is already active replaces the current boost (new temperature + timer from now). Boosts do not stack. On finish, Thermostat Boost restores the original pre-boost snapshot (temperature/schedules), not the temporary state from the already-running boost.  The custom card prevents replacing one boost with another but it can be done from a service call.
+
+> [!NOTE]
 > If a single scheduler switch controls multiple thermostats, boosting one thermostat will still toggle that shared scheduler switch and can therefore affect the other thermostats on that schedule.
+
+### Multiple thermostat boost (card)
+
+1. Select one or more thermostats using the picker at the top of the card.
+1. Set the boost temperature offset and duration.
+1. Click `Start boost on selected thermostats`.
+
+Notes:
+- The card applies the same offset and duration to all selected thermostats.
+- This card is for starting boosts only. Use the cancel-all card to end active boosts.
+
+### Cancel all boosts (card)
+This is the standalone cancel button, which appears in the card picker as "Thermostat Boost - cancel all button".
+
+UI steps:
+1. Add a `custom:thermostat-boost-cancel-all-card` card to your dashboard.
+1. Click `Cancel boost on ALL thermostats` to end any active boosts.
 
 ### Disable Schedules toggle (Long-Term Changes)
 
