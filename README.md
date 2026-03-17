@@ -6,22 +6,47 @@
 
 Previously, I had developed a series of automations to achieve this which involved creating numerous helpers for each instance. Adding a new thermostat took some time to do. I wanted to see if I could streamline this as well as test how well ChatGPT could code as this is well beyond my capabilities.
 
-This integration has been designed around my own use case.  I'm happy to take suggestions on board but it's unlikely I'll implement them, no matter how good they sound as I don't have the time to maintain this. I'll try to fix any major bugs or if something stops working due to a new HA release but no promises.  
-
-A few notes:
- 
- - The included dashboard card uses [Bubble Card](https://github.com/Clooos/Bubble-Card), [Scheduler Card](https://github.com/nielsfaber/scheduler-card) (and its associated [Scheduler Component](https://github.com/nielsfaber/scheduler-component)), and [Slider Entity Row](https://github.com/thomasloven/lovelace-slider-entity-row).  I have made the Scheduler card optional but you must have Bubble Card and Slider Entity Row installed to use the custom cards.
- - I haven't tested it but this should work for both Celsius and Fahrenheit.
- - Certain logic e.g. not being able to change schedules during boosts is enforced using the included card. I don't know how well the boost will handle it if changes are made outside of the card but I expect it will work.  
- - The included services should be hardened sufficiently so that even without using the included custom card and its logic from the above bullet, things should still work.
+This integration has been designed around my own use case.  I'm happy to take suggestions on board but it's unlikely I'll implement them, no matter how good they sound as I don't have the time to maintain this. I'll try to fix any major bugs or if something stops working due to a new HA release but no promises.
 
 > [!CAUTION]
-> Because this was developed by ChatGPT, I have no idea if the code is efficient or uses best practice. I've done a fair bit of testing but I may well have missed issues. I've also rearchitected the way it works a number of times and haven't had a chance to test so extensively. Use at own risk!
+> Because this was developed by ChatGPT Codex, I have no idea if the code is efficient or uses best practice. I've done a fair bit of testing but I may well have missed issues. I've also rearchitected the way it works a number of times and haven't had a chance to test so extensively. Use at own risk!
 
-### Integration icon
+## Changelog
 
-> [!NOTE]
-> Starting from 2026.3, integration icons are now bundled with the integration. Home Assistant is no longer accepting icons the old way so if you're running an older build, this integration won't show a custom icon.
+- **1.1.0**
+  - Added the Track On-Device Changes toggle to handle thermostats with built-in schedules that would otherwise override a boost.
+  - Multi-thermostat selection is now persisted per user via backend storage.
+  - Various bugfixes
+- **1.0.0**
+  - Initial release.
+
+## Features
+
+- Fast temporary heat boost (or reduction) without touching your normal schedule setup (if you have one).
+- Can boost one or multiple thermostats either using an absolute temperature or an offset (the included multiple thermostats card only uses an offset but absolute can still be done with the service).
+- Automatic return to scheduled control or previous target temperature when boost ends.
+- Functionality to set certain thermostats to Call for Heat. An aggregate binary sensor can be used in automations to fire the boiler if your setup allows this. I'm not actually using this but I have tested that the feature works as intended.
+- Resilience during Home Assistant restarts or short outages.
+- Script and automation friendly services (`start_boost`, `finish_boost`).
+- **New in 1.1.0** - the integration can recognise if the thermostat's built-in schedule has kicked in during a boost and revert back to the boost temperature.  See the Track On-Device Changes just below for more detail.
+
+## Benefits
+
+- **Easy to set up**.  Add the integration to HACS and then set up a new integration per thermostat. Finally add the associated card(s) to your dashboard (or just use the Services).  Everything else should be taken care of.  It should be quick and easy!
+- **Scalable**. Works with multiple thermostats.
+- **Resilient**. Persists across Home Assistant restarts and works even if the boost expires when the server is offline.  This needs further testing as it was difficult to get working properly!
+- **Thought through!** I've tried to take into account all the different scenarios where things can go wrong and ensure the integration doesn't fall over. I've also designed the UI to make sense (to me at least).
+- **Services/Actions available**. If you don't want to use the supplied dashboard card, you can still be able to boost thermostats with the provided Services.
+
+## Track On-Device Changes
+
+Some thermostats (e.g. Nest) have their own internal schedules that can override a boost. The **Track On-Device Changes** toggle is intended for these cases. When enabled for a thermostat:
+
+- If the thermostat changes its target temperature during a boost (whether from its built-in schedule or a manual change on the device or vendor app), the boost temperature is re-applied so the boost remains in control.
+- I'd have preferred to only track those changes made automatically by schedules and ignore manual changes via the device or vendor app but this wasn't possible.
+- The most recent on-device change detected during the boost is remembered.
+- When the boost ends, Thermostat Boost restores that remembered on-device target temperature instead of the original pre-boost temperature to ensure the schedule is stuck to.
+- Changes to the thermostat via the Home Assistant UI are not tracked in this manner.
 
 ## Screenshots
 ### Thermostats summary (cancel all button is a separate card to allow placement anywhere)
@@ -39,22 +64,20 @@ A few notes:
 ### Integration detail
 ![Integration detail](https://raw.githubusercontent.com/londondev77/Home-Assistant-Thermostat-booster/refs/heads/main/screenshots/integration-detail.png)
 
-## Features
 
-- Fast temporary heat boost (or reduction) without touching your normal schedule setup (if you have one).
-- Can boost one or multiple thermostats either using an absolute temperature or an offset (the included multiple thermostats card only uses an offset but absolute can still be done with the service).
-- Automatic return to scheduled control or previous target temperature when boost ends.
-- Functionality to set certain thermostats to Call for Heat. An aggregate binary sensor can be used in automations to fire the boiler if your setup allows this. I'm not actually using this but I have tested that the feature works as intended.
-- Resilience during Home Assistant restarts or short outages.
-- Script and automation friendly services (`start_boost`, `finish_boost`).
+## Notes
 
-## Benefits
+ - The included dashboard card uses [Bubble Card](https://github.com/Clooos/Bubble-Card), [Scheduler Card](https://github.com/nielsfaber/scheduler-card) (and its associated [Scheduler Component](https://github.com/nielsfaber/scheduler-component)), and [Slider Entity Row](https://github.com/thomasloven/lovelace-slider-entity-row).  I have made the Scheduler card optional but you must have Bubble Card and Slider Entity Row installed to use the custom cards.
+ - I haven't tested it but this should work for both Celsius and Fahrenheit.
+ - Certain logic e.g. not being able to change schedules during boosts is enforced using the included card to avoid confusion. I don't know how well the boost will handle it if changes are made outside of the card but I expect it will work.  
+ - The included services should be hardened sufficiently so that even without using the included custom card and its logic from the above bullet, things should still work.
 
-- **Easy to set up**.  Add the integration to HACS and then set up a new integration per thermostat. Finally add the associated card(s) to your dashboard (or just use the Services).  Everything else should be taken care of.  It should be quick and easy!
-- **Scalable**. Works with multiple thermostats.
-- **Resilient**. Persists across Home Assistant restarts and works even if the boost expires when the server is offline.  This needs further testing as it was difficult to get working properly!
-- **Thought through!** I've tried to take into account all the different scenarios where things can go wrong and ensure the integration doesn't fall over. I've also designed the UI to make sense (to me at least).
-- **Services/Actions available**. If you don't want to use the supplied dashboard card, you can still be able to boost thermostats with the provided Services.
+
+
+### Integration icon
+
+> [!NOTE]
+> Starting from 2026.3, integration icons are now bundled with the integration. Home Assistant is no longer accepting icons the old way so if you're running an older build, this integration won't show a custom icon.
 
 ## Automatic Installation with HACS
 1. Add this repository to HACS using the following button
@@ -90,12 +113,13 @@ This repository includes `www/thermostat-boost-card.js`, a custom Lovelace card 
 - Boost time/temperature controls
 - Start/cancel actions
 - Countdown display
-- Display/edit/disble schedules (this can be turned off if you don't use scheudules)
+- Display/edit/disable schedules (this can be turned off if you don't use schedules)
 - Enforces some logic by disabling elements when they shouldn't be changed e.g. during a boost
 
 > [!NOTE]
 > - The Call for Heat toggle is not included on the dashboard card to save space, as it is expected to be changed infrequently. I also want to avoid accidental toggling.
 > - You can change this setting from the thermostat Device Info page in **Settings -> Devices & Services**.
+> - The "Track On-Device Changes" switch is also available there. When enabled, on-device setpoint changes during a boost are captured and restored when the boost ends.
 
 ### Installing the Lovelace card
 [Click here for instructions on how to install the Lovelace card](https://developers.home-assistant.io/docs/frontend/custom-ui/registering-resources).
@@ -203,7 +227,7 @@ The integration includes several safeguards:
   - Reads thermostat `min_temp` and `max_temp` attributes
   - If either value is unavailable/invalid, it is normalised to `0`
   - Default fallback range - metric (`C`): `5-25`, US customary (`F`): `40-80`
-  - If both normalized values are `0`, the fallback range is used
+  - If both normalised values are `0`, the fallback range is used
   - If `max_temp` is `0` and `min_temp` is > `0`, `max_temp` is set to the fallback max
   - If bounds are inverted (`min_temp > max_temp`), both are reset to the fallback range
   - Updates dynamically when thermostat min/max attributes change (no integration reload required)

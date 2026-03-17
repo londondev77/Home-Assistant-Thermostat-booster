@@ -17,11 +17,13 @@ from .boost_actions import (
 )
 from .const import (
     CONF_CALL_FOR_HEAT_ENABLED,
+    CONF_TRACK_ON_DEVICE_CHANGES,
     CONF_THERMOSTAT,
     DOMAIN,
     UNIQUE_ID_CALL_FOR_HEAT_ENABLED,
     UNIQUE_ID_BOOST_ACTIVE,
     UNIQUE_ID_SCHEDULE_OVERRIDE,
+    UNIQUE_ID_TRACK_ON_DEVICE_CHANGES,
 )
 from .entity_base import ThermostatBoostEntity
 
@@ -37,6 +39,7 @@ async def async_setup_entry(
         [
             ScheduleOverrideSwitch(hass, entry, data),
             CallForHeatEnabledSwitch(hass, entry, data),
+            TrackOnDeviceChangesSwitch(hass, entry, data),
         ]
     )
 
@@ -163,6 +166,65 @@ class CallForHeatEnabledSwitch(ThermostatBoostEntity, SwitchEntity, RestoreEntit
         if new_data.get(CONF_CALL_FOR_HEAT_ENABLED) == self._is_on:
             return
         new_data[CONF_CALL_FOR_HEAT_ENABLED] = self._is_on
+        self.hass.config_entries.async_update_entry(self._entry, data=new_data)
+
+
+class TrackOnDeviceChangesSwitch(ThermostatBoostEntity, SwitchEntity, RestoreEntity):
+    """Switch controlling whether device-only changes are tracked during boost."""
+
+    _attr_icon = "mdi:thermostat-auto"
+
+    def __init__(
+        self, hass: HomeAssistant, entry: ConfigEntry, data: dict
+    ) -> None:
+        super().__init__(
+            hass,
+            entry,
+            data,
+            entity_name="Track On-Device Changes",
+            unique_id_suffix=UNIQUE_ID_TRACK_ON_DEVICE_CHANGES,
+        )
+        self._is_on = bool(data.get(CONF_TRACK_ON_DEVICE_CHANGES, False))
+
+    async def async_added_to_hass(self) -> None:
+        """Restore state on startup."""
+        await super().async_added_to_hass()
+        if CONF_TRACK_ON_DEVICE_CHANGES in self._entry.data:
+            self._is_on = bool(
+                self._entry.data.get(CONF_TRACK_ON_DEVICE_CHANGES, False)
+            )
+            return
+        if (state := await self.async_get_last_state()) is not None:
+            self._is_on = state.state == STATE_ON
+
+    @property
+    def is_on(self) -> bool:
+        """Return true if the switch is on."""
+        return self._is_on
+
+    async def async_turn_on(self, **kwargs) -> None:
+        """Turn the switch on."""
+        self._is_on = True
+        self._async_persist_setting()
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs) -> None:
+        """Turn the switch off."""
+        self._is_on = False
+        self._async_persist_setting()
+        self.async_write_ha_state()
+
+    @callback
+    def _async_persist_setting(self) -> None:
+        """Persist current preference in config entry/runtime data."""
+        entry_data = self.hass.data.get(DOMAIN, {}).get(self._entry.entry_id)
+        if isinstance(entry_data, dict):
+            entry_data[CONF_TRACK_ON_DEVICE_CHANGES] = self._is_on
+
+        new_data = dict(self._entry.data)
+        if new_data.get(CONF_TRACK_ON_DEVICE_CHANGES) == self._is_on:
+            return
+        new_data[CONF_TRACK_ON_DEVICE_CHANGES] = self._is_on
         self.hass.config_entries.async_update_entry(self._entry, data=new_data)
 
 

@@ -7,10 +7,12 @@
         "description": "Choose the thermostat you want to control.",
         "data": {
           "thermostat": "Thermostat",
-          "call_for_heat_enabled": "Allow thermostat to Call for Heat"
+          "call_for_heat_enabled": "Allow thermostat to Call for Heat",
+          "track_on_device_changes": "Track On-Device Changes"
         },
         "data_description": {
-          "call_for_heat_enabled": "This setting can be changed by visiting the Device Info page in Devices & Services"
+          "call_for_heat_enabled": "This setting can be changed by visiting the Device Info page in Devices & Services",
+          "track_on_device_changes": "If enabled, thermostat changes made outside Home Assistant (device schedule, physical controls, or the vendor app) during a boost are overridden to keep the boost active. The most recent on-device change is saved and restored when the boost ends. Useful for devices with built-in schedules such as Nest."
         }
       }
     },

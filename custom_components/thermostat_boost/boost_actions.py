@@ -6,8 +6,8 @@ import logging
 from typing import Callable
 
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.event import async_call_later
+from homeassistant.core import HomeAssistant, Context, callback
+from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 
@@ -32,6 +32,13 @@ _SNAPSHOT_RESTORE_RETRY_DELAY = 15
 _SNAPSHOT_RESTORE_PENDING_KEY = "snapshot_restore_pending"
 _SNAPSHOT_RESTORE_UNSUB_KEY = "snapshot_restore_unsub"
 _FINISH_IN_PROGRESS_KEY = "finish_in_progress"
+_EXTERNAL_CHANGE_UNSUB_KEY = "external_change_unsub"
+_EXTERNAL_SERVICE_UNSUB_KEY = "external_service_unsub"
+_EXTERNAL_REAPPLY_UNSUB_KEY = "external_reapply_unsub"
+_EXTERNAL_IGNORE_CONTEXT_KEY = "external_ignore_context"
+_EXTERNAL_IGNORE_SERVICE_CONTEXT_KEY = "external_ignore_service_context"
+_ACTIVE_TARGET_TEMP_KEY = "active_boost_target"
+_EXTERNAL_REAPPLY_DELAY_SECONDS = 5
 _TEMP_SNAPSHOT_STORAGE_VERSION = 1
 _TEMP_SNAPSHOT_STORAGE_KEY = f"{DOMAIN}.temperature_snapshot"
 _LOGGER = logging.getLogger(__name__)
@@ -74,6 +81,54 @@ def _get_snapshot_restore_unsub(
 def _get_finish_in_progress(hass: HomeAssistant) -> set[str]:
     domain_data = hass.data.setdefault(DOMAIN, {})
     return domain_data.setdefault(_FINISH_IN_PROGRESS_KEY, set())
+
+
+def _get_external_change_unsubs(
+    hass: HomeAssistant,
+) -> dict[str, Callable[[], None]]:
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    return domain_data.setdefault(_EXTERNAL_CHANGE_UNSUB_KEY, {})
+
+
+def _get_external_service_unsubs(
+    hass: HomeAssistant,
+) -> dict[str, Callable[[], None]]:
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    return domain_data.setdefault(_EXTERNAL_SERVICE_UNSUB_KEY, {})
+
+
+def _get_external_reapply_unsubs(
+    hass: HomeAssistant,
+) -> dict[str, Callable[[], None]]:
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    return domain_data.setdefault(_EXTERNAL_REAPPLY_UNSUB_KEY, {})
+
+
+def _get_external_ignore_contexts(hass: HomeAssistant) -> dict[str, set[str]]:
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    return domain_data.setdefault(_EXTERNAL_IGNORE_CONTEXT_KEY, {})
+
+
+def _get_external_ignore_service_contexts(
+    hass: HomeAssistant,
+) -> dict[str, set[str]]:
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    return domain_data.setdefault(_EXTERNAL_IGNORE_SERVICE_CONTEXT_KEY, {})
+
+def _get_active_boost_targets(hass: HomeAssistant) -> dict[str, float]:
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    return domain_data.setdefault(_ACTIVE_TARGET_TEMP_KEY, {})
+
+
+@callback
+def async_register_external_ignore_context(
+    hass: HomeAssistant, entry_id: str, context_id: str | None
+) -> None:
+    """Register a context id to ignore for external-change detection."""
+    if not context_id:
+        return
+    ignore = _get_external_ignore_contexts(hass).setdefault(entry_id, set())
+    ignore.add(context_id)
 
 
 @callback
@@ -377,6 +432,43 @@ async def async_store_target_temperature_snapshot(
     return temperature
 
 
+async def async_store_target_temperature_snapshot_value(
+    hass: HomeAssistant,
+    entry_id: str,
+    thermostat_entity_id: str,
+    temperature: float | None,
+) -> float | None:
+    """Persist provided thermostat target temperature for later restore."""
+    if temperature is None:
+        _LOGGER.debug(
+            "No target temperature value available to snapshot for %s (%s)",
+            entry_id,
+            thermostat_entity_id,
+        )
+        return None
+    try:
+        temperature = float(temperature)
+    except (TypeError, ValueError):
+        _LOGGER.debug(
+            "Invalid target temperature value to snapshot for %s (%s): %s",
+            entry_id,
+            thermostat_entity_id,
+            temperature,
+        )
+        return None
+
+    store, data = await _load_temperature_snapshot_store(hass)
+    data[entry_id] = temperature
+    await store.async_save(data)
+    _LOGGER.debug(
+        "Stored target temperature snapshot (override) for %s (%s): %s",
+        entry_id,
+        thermostat_entity_id,
+        temperature,
+    )
+    return temperature
+
+
 async def async_restore_target_temperature_snapshot(
     hass: HomeAssistant, entry_id: str, thermostat_entity_id: str
 ) -> bool:
@@ -444,6 +536,223 @@ async def async_clear_target_temperature_snapshot(
 
 
 @callback
+def _get_state_target_temperature(state) -> float | None:
+    if state is None or state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+        return None
+    value = state.attributes.get("temperature")
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+@callback
+def async_unregister_external_temperature_monitor(hass: HomeAssistant, entry_id: str) -> None:
+    """Stop monitoring external temperature changes for a boost entry."""
+    if (unsub := _get_external_change_unsubs(hass).pop(entry_id, None)) is not None:
+        unsub()
+    if (unsub := _get_external_service_unsubs(hass).pop(entry_id, None)) is not None:
+        unsub()
+    if (unsub := _get_external_reapply_unsubs(hass).pop(entry_id, None)) is not None:
+        unsub()
+    _get_active_boost_targets(hass).pop(entry_id, None)
+    _get_external_ignore_contexts(hass).pop(entry_id, None)
+    _get_external_ignore_service_contexts(hass).pop(entry_id, None)
+
+
+async def async_register_external_temperature_monitor(
+    hass: HomeAssistant,
+    entry_id: str,
+    thermostat_entity_id: str,
+    boost_target_temp: float,
+) -> None:
+    """Monitor for external target changes during a boost and update snapshot."""
+    async_unregister_external_temperature_monitor(hass, entry_id)
+    _get_active_boost_targets(hass)[entry_id] = float(boost_target_temp)
+    _get_external_ignore_service_contexts(hass).setdefault(entry_id, set())
+    _LOGGER.debug(
+        "External temp monitor registered for %s (%s) with boost_target=%s",
+        entry_id,
+        thermostat_entity_id,
+        boost_target_temp,
+    )
+
+    @callback
+    def _handle_service_call(event) -> None:
+        if event.data.get("domain") != "climate":
+            return
+        if event.data.get("service") != "set_temperature":
+            return
+        service_data = event.data.get("service_data") or {}
+        entity_ids = service_data.get("entity_id")
+        if isinstance(entity_ids, str):
+            match = entity_ids == thermostat_entity_id
+        elif isinstance(entity_ids, list):
+            match = thermostat_entity_id in entity_ids
+        else:
+            match = False
+        if not match:
+            return
+        if event.context:
+            _get_external_ignore_service_contexts(hass)[entry_id].add(event.context.id)
+            _LOGGER.debug(
+                "Service call captured for %s (%s): context_id=%s",
+                entry_id,
+                thermostat_entity_id,
+                event.context.id,
+            )
+
+    _get_external_service_unsubs(hass)[entry_id] = hass.bus.async_listen(
+        "call_service", _handle_service_call
+    )
+
+    @callback
+    def _handle_state_change(event) -> None:
+        if not _is_switch_on(hass, entry_id, UNIQUE_ID_BOOST_ACTIVE):
+            return
+        _LOGGER.debug(
+            "State change seen for %s (%s): context_id=%s user_id=%s parent_id=%s",
+            entry_id,
+            thermostat_entity_id,
+            event.context.id if event.context else None,
+            event.context.user_id if event.context else None,
+            event.context.parent_id if event.context else None,
+        )
+        if event.context and event.context.user_id:
+            _LOGGER.debug(
+                "State change ignored (user-context) for %s (%s): user_id=%s",
+                entry_id,
+                thermostat_entity_id,
+                event.context.user_id,
+            )
+            return
+        new_state = event.data.get("new_state")
+        old_state = event.data.get("old_state")
+        new_temp = _get_state_target_temperature(new_state)
+        old_temp = _get_state_target_temperature(old_state)
+        if new_temp is None or new_temp == old_temp:
+            return
+        context_id = event.context.id if event.context else None
+        parent_id = event.context.parent_id if event.context else None
+        ignore = _get_external_ignore_contexts(hass).get(entry_id)
+        if ignore:
+            if context_id and context_id in ignore:
+                ignore.discard(context_id)
+                _LOGGER.debug(
+                    "State change ignored (self-context) for %s (%s): %s",
+                    entry_id,
+                    thermostat_entity_id,
+                    context_id,
+                )
+                return
+            if parent_id and parent_id in ignore:
+                ignore.discard(parent_id)
+                _LOGGER.debug(
+                    "State change ignored (self-parent) for %s (%s): %s",
+                    entry_id,
+                    thermostat_entity_id,
+                    parent_id,
+                )
+                return
+        service_ignore = _get_external_ignore_service_contexts(hass).get(entry_id)
+        if service_ignore:
+            if context_id and context_id in service_ignore:
+                service_ignore.discard(context_id)
+                _LOGGER.debug(
+                    "State change ignored (service-context) for %s (%s): %s",
+                    entry_id,
+                    thermostat_entity_id,
+                    context_id,
+                )
+                return
+            if parent_id and parent_id in service_ignore:
+                service_ignore.discard(parent_id)
+                _LOGGER.debug(
+                    "State change ignored (service-parent) for %s (%s): %s",
+                    entry_id,
+                    thermostat_entity_id,
+                    parent_id,
+                )
+                return
+        hass.async_create_task(
+            _async_handle_external_target_change(
+                hass, entry_id, thermostat_entity_id, new_temp
+            )
+        )
+
+    _get_external_change_unsubs(hass)[entry_id] = async_track_state_change_event(
+        hass,
+        [thermostat_entity_id],
+        _handle_state_change,
+    )
+
+
+async def _async_handle_external_target_change(
+    hass: HomeAssistant,
+    entry_id: str,
+    thermostat_entity_id: str,
+    new_temp: float,
+) -> None:
+    _LOGGER.debug(
+        "External target change detected for %s (%s): %s",
+        entry_id,
+        thermostat_entity_id,
+        new_temp,
+    )
+    await async_store_target_temperature_snapshot_value(
+        hass, entry_id, thermostat_entity_id, new_temp
+    )
+    _schedule_boost_temperature_reapply(hass, entry_id, thermostat_entity_id)
+
+
+@callback
+def _schedule_boost_temperature_reapply(
+    hass: HomeAssistant, entry_id: str, thermostat_entity_id: str
+) -> None:
+    if (unsub := _get_external_reapply_unsubs(hass).pop(entry_id, None)) is not None:
+        unsub()
+
+    def _reapply(_now) -> None:
+        hass.loop.call_soon_threadsafe(
+            hass.async_create_task,
+            _async_reapply_boost_temperature(hass, entry_id, thermostat_entity_id),
+        )
+
+    _get_external_reapply_unsubs(hass)[entry_id] = async_call_later(
+        hass, _EXTERNAL_REAPPLY_DELAY_SECONDS, _reapply
+    )
+
+
+async def _async_reapply_boost_temperature(
+    hass: HomeAssistant, entry_id: str, thermostat_entity_id: str
+) -> None:
+    if not _is_switch_on(hass, entry_id, UNIQUE_ID_BOOST_ACTIVE):
+        return
+    target_temp = _get_active_boost_targets(hass).get(entry_id)
+    if target_temp is None:
+        return
+    context = Context()
+    ignore_contexts = _get_external_ignore_contexts(hass).setdefault(entry_id, set())
+    ignore_contexts.add(context.id)
+    _LOGGER.debug(
+        "Reapplying boost target temperature for %s (%s): %s",
+        entry_id,
+        thermostat_entity_id,
+        target_temp,
+    )
+    await hass.services.async_call(
+        "climate",
+        "set_temperature",
+        {
+            "entity_id": thermostat_entity_id,
+            "temperature": target_temp,
+        },
+        blocking=True,
+        context=context,
+    )
+
+
+@callback
 def _get_entity_id(hass: HomeAssistant, entry_id: str, unique_id_suffix: str) -> str | None:
     entity_reg = er.async_get(hass)
     unique_id = f"{entry_id}_{unique_id_suffix}"
@@ -476,6 +785,8 @@ async def async_finish_boost_for_entry(
         if not data:
             _LOGGER.debug("Finish boost skipped for %s: entry not found", entry_id)
             return
+
+        async_unregister_external_temperature_monitor(hass, entry_id)
 
         registry = await async_get_timer_registry(hass)
         timer = await registry.async_get_timer(

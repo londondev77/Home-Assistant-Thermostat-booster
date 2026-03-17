@@ -15,6 +15,7 @@ from .const import (
     CONF_CALL_FOR_HEAT_ENABLED,
     CONF_ENTRY_TYPE,
     CONF_THERMOSTAT,
+    CONF_TRACK_ON_DEVICE_CHANGES,
     DOMAIN,
     ENTRY_TYPE_AGGREGATE,
     ENTRY_TYPE_THERMOSTAT,
@@ -101,6 +102,7 @@ class ThermostatBoostConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     }
                 ),
                 vol.Optional(CONF_CALL_FOR_HEAT_ENABLED, default=False): bool,
+                vol.Optional(CONF_TRACK_ON_DEVICE_CHANGES, default=False): bool,
             }
         )
         return self.async_show_form(step_id="user", data_schema=data_schema)
@@ -121,6 +123,9 @@ class ThermostatBoostConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_THERMOSTAT: thermostat,
                 CONF_CALL_FOR_HEAT_ENABLED: bool(
                     user_input.get(CONF_CALL_FOR_HEAT_ENABLED, False)
+                ),
+                CONF_TRACK_ON_DEVICE_CHANGES: bool(
+                    user_input.get(CONF_TRACK_ON_DEVICE_CHANGES, False)
                 ),
             },
         )

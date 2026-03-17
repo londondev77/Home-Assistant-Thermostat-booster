@@ -17,7 +17,7 @@ from homeassistant.const import (
     STATE_UNKNOWN,
     UnitOfTemperature,
 )
-from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.core import HomeAssistant, ServiceCall, Context, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -33,12 +33,15 @@ except ImportError:  # pragma: no cover - compatibility guard for older HA cores
 from .boost_actions import (
     async_create_scheduler_scene,
     async_finish_boost_for_entry,
+    async_register_external_ignore_context,
+    async_register_external_temperature_monitor,
     async_store_target_temperature_snapshot,
 )
 from .binary_sensor import async_set_boost_active_state
 from .number import _dynamic_boost_temperature_bounds
 from .const import (
     CONF_THERMOSTAT,
+    CONF_TRACK_ON_DEVICE_CHANGES,
     DATA_THERMOSTAT_NAME,
     DOMAIN,
     SERVICE_START_BOOST,
@@ -585,6 +588,21 @@ async def async_start_boost_for_entry(
         )
     target_temp = bounded_target_temp
 
+    if bool(data.get(CONF_TRACK_ON_DEVICE_CHANGES, False)):
+        _LOGGER.debug(
+            "Registering external temperature monitor for %s (%s)",
+            entry_id,
+            data[CONF_THERMOSTAT],
+        )
+        await async_register_external_temperature_monitor(
+            hass,
+            entry_id,
+            data[CONF_THERMOSTAT],
+            target_temp,
+        )
+
+    context = Context()
+    async_register_external_ignore_context(hass, entry_id, context.id)
     await hass.services.async_call(
         "climate",
         "set_temperature",
@@ -593,6 +611,7 @@ async def async_start_boost_for_entry(
             "temperature": target_temp,
         },
         blocking=True,
+        context=context,
     )
     _LOGGER.debug(
         "Start boost step complete for %s: target temperature applied "

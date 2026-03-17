@@ -1,6 +1,6 @@
 /* Thermostat Boost Lovelace Card */
 (() => {
-  const VERSION = "1.0.0";
+  const VERSION = "1.1";
   const DOMAIN = "thermostat_boost";
   const CARD_TYPE = "thermostat-boost-card";
   const ALL_CARD_TYPE = "thermostat-boost-all-card";
@@ -26,6 +26,8 @@
     "Button disabled until a thermostat boost is active";
   const DEVICE_PICKER_STORAGE_KEY =
     "thermostat_boost_device_picker_selection";
+  const PICKER_WS_GET = `${DOMAIN}/picker/get_selection`;
+  const PICKER_WS_SET = `${DOMAIN}/picker/set_selection`;
 
   const computeLabel = (device) =>
     device?.name_by_user || device?.name || device?.id || "Thermostat Boost";
@@ -82,8 +84,6 @@
       this._bubbleHeaderConfig = null;
       this._mainStack = null;
       this._mainStackConfig = null;
-      this._bubbleHookTimer = null;
-      this._bubbleCountdownTimer = null;
       this._mainStartButtonRefreshTimer = null;
       this._mainStartButtonRefreshTimers = [];
       this._schedulerLockRefreshTimer = null;
@@ -186,14 +186,6 @@
     }
 
     disconnectedCallback() {
-      if (this._bubbleHookTimer) {
-        clearInterval(this._bubbleHookTimer);
-        this._bubbleHookTimer = null;
-      }
-      if (this._bubbleCountdownTimer) {
-        clearInterval(this._bubbleCountdownTimer);
-        this._bubbleCountdownTimer = null;
-      }
       if (this._mainStartButtonRefreshTimer) {
         clearTimeout(this._mainStartButtonRefreshTimer);
         this._mainStartButtonRefreshTimer = null;
@@ -1261,38 +1253,6 @@
       return null;
     }
 
-    _mountBubbleInlineCountdown() {
-      if (!this._resolved?.boostFinishEntityId || !this._hass) return false;
-      const countdownButtonClass = this._resolved?.scheduleOverrideEntityId
-        ? ".bubble-sub-button-2"
-        : ".bubble-sub-button-1";
-      const subButton = this._queryDeep(countdownButtonClass);
-      if (!subButton) return false;
-
-      return this._updateBubbleCountdownText();
-    }
-
-    _formatCountdown(entityId) {
-      const stateObj = this._hass?.states?.[entityId];
-      let finishIso = stateObj?.state;
-      if (!finishIso || finishIso === "unknown" || finishIso === "unavailable") {
-        finishIso = stateObj?.attributes?.end_time || null;
-      }
-      const finish = finishIso ? parseTimestamp(finishIso) : NaN;
-      if (Number.isNaN(finish)) return "Inactive";
-
-      const now = Date.now();
-      let remainingSec = Math.max(0, Math.floor((finish - now) / 1000));
-      const hours = Math.floor(remainingSec / 3600);
-      remainingSec -= hours * 3600;
-      const minutes = Math.floor(remainingSec / 60);
-      const seconds = remainingSec - minutes * 60;
-      const hh = String(hours).padStart(2, "0");
-      const mm = String(minutes).padStart(2, "0");
-      const ss = String(seconds).padStart(2, "0");
-      return `${hh}:${mm}:${ss}`;
-    }
-
     _queryDeepAll(selector) {
       return this._queryDeepAllFrom(this._root, selector);
     }
@@ -1324,71 +1284,6 @@
       return results;
     }
 
-    _updateBubbleCountdownText() {
-      if (!this._resolved?.boostFinishEntityId || !this._hass) return false;
-      let candidates = this._queryDeepAll(".bubble-sub-button-state");
-      if (candidates.length === 0) {
-        candidates = this._queryDeepAll(".bubble-sub-button .state");
-      }
-      if (candidates.length === 0) {
-        candidates = this._queryDeepAll("[class*='sub-button'][class*='state']");
-      }
-      const stateObj = this._hass.states[this._resolved.boostFinishEntityId];
-      const rawState = (stateObj?.state || "").trim();
-      const rawEnd = (stateObj?.attributes?.end_time || "").trim();
-      const datetimeHint = /\d{4}-\d{2}-\d{2}|\d{1,2}:\d{2}/;
-      let container = null;
-      for (let i = 0; i < candidates.length; i += 1) {
-        const text = (candidates[i].textContent || "").trim();
-        if (!text) continue;
-        if (rawState && text.includes(rawState)) {
-          container = candidates[i];
-          break;
-        }
-        if (rawEnd && text.includes(rawEnd)) {
-          container = candidates[i];
-          break;
-        }
-        if (datetimeHint.test(text)) {
-          container = candidates[i];
-          break;
-        }
-      }
-      if (!container) {
-        container = candidates[0] || null;
-      }
-      if (!container) return false;
-
-      container.textContent = this._formatCountdown(this._resolved.boostFinishEntityId);
-      container.style.fontVariantNumeric = "tabular-nums";
-      return true;
-    }
-
-    _startBubbleCountdownTicker() {
-      if (this._bubbleCountdownTimer) {
-        clearInterval(this._bubbleCountdownTimer);
-      }
-      this._bubbleCountdownTimer = setInterval(() => {
-        this._updateBubbleCountdownText();
-      }, 1000);
-    }
-
-    _scheduleBubbleInlineMount() {
-      if (this._bubbleHookTimer) {
-        clearInterval(this._bubbleHookTimer);
-        this._bubbleHookTimer = null;
-      }
-      let attempts = 0;
-      this._bubbleHookTimer = setInterval(() => {
-        attempts += 1;
-        const mounted = this._mountBubbleInlineCountdown();
-        if (mounted || attempts >= 80) {
-          clearInterval(this._bubbleHookTimer);
-          this._bubbleHookTimer = null;
-        }
-      }, 250);
-      this._startBubbleCountdownTicker();
-    }
   }
 
   class ThermostatBoostCountdownCard extends HTMLElement {
@@ -2243,31 +2138,6 @@
     }
   }
 
-  class ThermostatBoostDividerCard extends HTMLElement {
-    constructor() {
-      super();
-      this.attachShadow({ mode: "open" });
-      const style = document.createElement("style");
-      style.textContent = `
-        .divider {
-          border: 0;
-          border-top: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
-          opacity: 1;
-          margin: 6px 0;
-        }
-      `;
-      const hr = document.createElement("hr");
-      hr.classList.add("divider");
-      this.shadowRoot.append(style, hr);
-    }
-
-    setConfig(_config) {}
-    set hass(_hass) {}
-    getCardSize() {
-      return 1;
-    }
-  }
-
   class ThermostatBoostDevicePickerCard extends HTMLElement {
     constructor() {
       super();
@@ -2276,6 +2146,7 @@
       this._selection = {};
       this._selectionLoaded = false;
       this._selectionLoadPromise = null;
+      this._selectionSource = "none";
     }
 
     setConfig(config) {
@@ -2297,6 +2168,9 @@
     set hass(hass) {
       this._hass = hass;
       this._ensureSelectionLoaded();
+      if (this._selectionLoaded && this._selectionSource === "local_storage") {
+        this._refreshSelectionFromHaStorage();
+      }
       this._render();
     }
 
@@ -2308,19 +2182,29 @@
       return { ...this._selection };
     }
 
+    _getStorageHass() {
+      const realHass = document.querySelector("home-assistant")?.hass || null;
+      if (realHass?.callWS) return realHass;
+      if (this._hass?.callWS) return this._hass;
+      return realHass || this._hass || null;
+    }
+
     async _ensureSelectionLoaded() {
       if (this._selectionLoaded || this._selectionLoadPromise) return;
       this._selectionLoadPromise = (async () => {
-        const hass =
-          this._hass || document.querySelector("home-assistant")?.hass || null;
+        const hass = this._getStorageHass();
         let stored = null;
+        let source = "none";
         if (hass?.callWS) {
           try {
             const result = await hass.callWS({
-              type: "storage/get",
-              key: DEVICE_PICKER_STORAGE_KEY,
+              type: PICKER_WS_GET,
+              user_id: hass?.user?.id,
             });
-            stored = result?.value ?? result?.data ?? result ?? null;
+            stored = result?.selection ?? null;
+            if (stored) {
+              source = "ha_ws";
+            }
           } catch (_err) {
             stored = null;
           }
@@ -2331,6 +2215,9 @@
               DEVICE_PICKER_STORAGE_KEY
             );
             stored = raw ? JSON.parse(raw) : null;
+            if (stored) {
+              source = "local_storage";
+            }
           } catch (_err) {
             stored = null;
           }
@@ -2344,8 +2231,15 @@
             }
           }
         }
+        if (source === "local_storage" && hass?.callWS) {
+          const refreshedSource = await this._refreshSelectionFromHaStorage();
+          if (refreshedSource) {
+            source = refreshedSource;
+          }
+        }
         this._selectionLoaded = true;
         this._selectionLoadPromise = null;
+        this._selectionSource = source;
         this._emitSelectionChanged();
         this._render();
       })();
@@ -2360,28 +2254,49 @@
       } catch (_err) {
         // Ignore local storage failures
       }
-      const hass =
-        this._hass || document.querySelector("home-assistant")?.hass || null;
+      const hass = this._getStorageHass();
       if (!hass?.callWS) return;
       try {
         await hass.callWS({
-          type: "storage/save",
-          key: DEVICE_PICKER_STORAGE_KEY,
-          value: this._selection,
+          type: PICKER_WS_SET,
+          user_id: hass?.user?.id,
+          selection: this._selection,
         });
         return;
-      } catch (_err) {
-        // Fall back to alternate storage payload
+      } catch (err) {
+        void err;
       }
+    }
+
+    async _refreshSelectionFromHaStorage() {
+      const hass = this._getStorageHass();
+      if (!hass?.callWS) return null;
+      let stored = null;
       try {
-        await hass.callWS({
-          type: "storage/save",
-          key: DEVICE_PICKER_STORAGE_KEY,
-          data: this._selection,
+        const result = await hass.callWS({
+          type: PICKER_WS_GET,
+          user_id: hass?.user?.id,
         });
+        stored = result?.selection ?? null;
       } catch (_err) {
-        // Ignore storage failures
+        stored = null;
       }
+      if (stored && typeof stored === "object" && !Array.isArray(stored)) {
+        for (const device of this._devices) {
+          const deviceId = device?.device_id;
+          if (!deviceId) continue;
+          if (Object.prototype.hasOwnProperty.call(stored, deviceId)) {
+            this._selection[deviceId] = Boolean(stored[deviceId]);
+          }
+        }
+        this._selectionSource = "ha_ws";
+        this._emitSelectionChanged();
+        this._render();
+        return "ha_ws";
+      }
+      await this._persistSelection();
+      this._selectionSource = "ha_ws_promoted";
+      return "ha_ws_promoted";
     }
 
     _render() {
@@ -2794,12 +2709,6 @@
     customElements.define(
       "thermostat-boost-countdown",
       ThermostatBoostCountdownCard
-    );
-  }
-  if (!customElements.get("thermostat-boost-divider")) {
-    customElements.define(
-      "thermostat-boost-divider",
-      ThermostatBoostDividerCard
     );
   }
   if (!customElements.get("thermostat-boost-device-picker")) {

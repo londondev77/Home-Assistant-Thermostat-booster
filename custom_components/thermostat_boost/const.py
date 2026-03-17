@@ -5,6 +5,7 @@ DOMAIN = "thermostat_boost"
 CONF_THERMOSTAT = "thermostat"
 CONF_ENTRY_TYPE = "entry_type"
 CONF_CALL_FOR_HEAT_ENABLED = "call_for_heat_enabled"
+CONF_TRACK_ON_DEVICE_CHANGES = "track_on_device_changes"
 
 DATA_THERMOSTAT_NAME = "thermostat_name"
 
@@ -21,3 +22,4 @@ UNIQUE_ID_BOOST_ACTIVE = "boost_active"
 UNIQUE_ID_BOOST_FINISH = "boost_finish"
 UNIQUE_ID_SCHEDULE_OVERRIDE = "disable_schedules"
 UNIQUE_ID_CALL_FOR_HEAT_ENABLED = "call_for_heat_enabled"
+UNIQUE_ID_TRACK_ON_DEVICE_CHANGES = "track_on_device_changes"

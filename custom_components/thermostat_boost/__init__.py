@@ -3,19 +3,24 @@
 from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant
 from homeassistant.const import Platform
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.storage import Store
+import voluptuous as vol
 from .boost_actions import (
     async_clear_scheduler_snapshot,
     async_clear_target_temperature_snapshot,
     async_finish_boost_for_entry,
+    async_unregister_external_temperature_monitor,
 )
 from .const import (
     CONF_CALL_FOR_HEAT_ENABLED,
     CONF_ENTRY_TYPE,
     CONF_THERMOSTAT,
+    CONF_TRACK_ON_DEVICE_CHANGES,
     DATA_THERMOSTAT_NAME,
     DOMAIN,
     ENTRY_TYPE_AGGREGATE,
@@ -45,11 +50,115 @@ _DELETE_CALL_FOR_HEAT_BLOCKED_MESSAGE = (
     "Thermostat Boost."
 )
 
+_PICKER_STORAGE_VERSION = 1
+_PICKER_STORAGE_KEY = f"{DOMAIN}.picker_selection"
+_PICKER_WS_GET = f"{DOMAIN}/picker/get_selection"
+_PICKER_WS_SET = f"{DOMAIN}/picker/set_selection"
+_PICKER_WS_REGISTERED = "picker_ws_registered"
+
+
+def _get_picker_store(hass: HomeAssistant) -> Store:
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    store = domain_data.get("picker_store")
+    if store is None:
+        store = Store(hass, _PICKER_STORAGE_VERSION, _PICKER_STORAGE_KEY)
+        domain_data["picker_store"] = store
+    return store
+
+
+async def _async_get_picker_data(hass: HomeAssistant) -> dict:
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    data = domain_data.get("picker_data")
+    if data is None:
+        store = _get_picker_store(hass)
+        data = await store.async_load() or {}
+        domain_data["picker_data"] = data
+    return data
+
+
+async def _async_save_picker_data(hass: HomeAssistant, data: dict) -> None:
+    store = _get_picker_store(hass)
+    await store.async_save(data)
+    hass.data.setdefault(DOMAIN, {})["picker_data"] = data
+
+
+def _async_register_picker_ws(hass: HomeAssistant) -> None:
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if domain_data.get(_PICKER_WS_REGISTERED):
+        return
+    websocket_api.async_register_command(hass, _ws_get_picker_selection)
+    websocket_api.async_register_command(hass, _ws_set_picker_selection)
+    domain_data[_PICKER_WS_REGISTERED] = True
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): _PICKER_WS_GET,
+        vol.Optional("user_id"): str,
+    }
+)
+@websocket_api.async_response
+async def _ws_get_picker_selection(hass: HomeAssistant, connection, msg) -> None:
+    user_id = msg.get("user_id")
+    if not user_id and connection.user:
+        user_id = connection.user.id
+    if not user_id:
+        connection.send_error(msg["id"], "no_user", "User not available")
+        return
+
+    data = await _async_get_picker_data(hass)
+    users = data.get("users")
+    selection = {}
+    if isinstance(users, dict):
+        entry = users.get(user_id)
+        if isinstance(entry, dict):
+            selection = entry.get("selection") or {}
+    if not isinstance(selection, dict):
+        selection = {}
+
+    connection.send_result(msg["id"], {"selection": selection})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): _PICKER_WS_SET,
+        vol.Optional("user_id"): str,
+        vol.Required("selection"): dict,
+    }
+)
+@websocket_api.async_response
+async def _ws_set_picker_selection(hass: HomeAssistant, connection, msg) -> None:
+    user_id = msg.get("user_id")
+    if not user_id and connection.user:
+        user_id = connection.user.id
+    if not user_id:
+        connection.send_error(msg["id"], "no_user", "User not available")
+        return
+
+    selection_in = msg.get("selection") or {}
+    cleaned = {}
+    if isinstance(selection_in, dict):
+        for key, value in selection_in.items():
+            if not isinstance(key, str):
+                continue
+            cleaned[key] = bool(value)
+
+    data = await _async_get_picker_data(hass)
+    users = data.get("users")
+    if not isinstance(users, dict):
+        users = {}
+        data["users"] = users
+    users[user_id] = {"selection": cleaned}
+    await _async_save_picker_data(hass, data)
+
+    connection.send_result(msg["id"], {"ok": True})
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Thermostat Boost from a config entry."""
     entry_type = entry.data.get(CONF_ENTRY_TYPE, ENTRY_TYPE_THERMOSTAT)
     hass.data.setdefault(DOMAIN, {})
+    _async_register_picker_ws(hass)
     _cleanup_legacy_aggregate_entity_binding(hass)
 
     if entry_type == ENTRY_TYPE_AGGREGATE:
@@ -79,6 +188,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         CONF_THERMOSTAT: thermostat_entity_id,
         CONF_CALL_FOR_HEAT_ENABLED: bool(
             entry.data.get(CONF_CALL_FOR_HEAT_ENABLED, False)
+        ),
+        CONF_TRACK_ON_DEVICE_CHANGES: bool(
+            entry.data.get(CONF_TRACK_ON_DEVICE_CHANGES, False)
         ),
         DATA_THERMOSTAT_NAME: thermostat_name,
     }
@@ -125,6 +237,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if entry_type == ENTRY_TYPE_THERMOSTAT:
             registry = await async_get_timer_registry(hass)
             await registry.async_unload_entry(entry.entry_id)
+            async_unregister_external_temperature_monitor(hass, entry.entry_id)
             hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
             if not _get_thermostat_entries(hass, exclude_entry_id=entry.entry_id):
                 _cleanup_domain_shared_state(hass)
@@ -151,6 +264,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
     registry = await async_get_timer_registry(hass)
     await registry.async_remove(entry.entry_id)
+    async_unregister_external_temperature_monitor(hass, entry.entry_id)
     await async_clear_scheduler_snapshot(hass, entry.entry_id)
     await async_clear_target_temperature_snapshot(hass, entry.entry_id)
     if not _get_thermostat_entries(hass, exclude_entry_id=entry.entry_id):
