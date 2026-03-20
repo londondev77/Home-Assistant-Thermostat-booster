@@ -1,10 +1,13 @@
 /* Thermostat Boost Lovelace Card */
 (() => {
-  const VERSION = "1.1";
+  const VERSION = "1.2";
   const DOMAIN = "thermostat_boost";
   const CARD_TYPE = "thermostat-boost-card";
   const ALL_CARD_TYPE = "thermostat-boost-all-card";
   const CANCEL_ALL_CARD_TYPE = "thermostat-boost-cancel-all-card";
+  const CARD_MODE_OVERVIEW = "overview";
+  const CARD_MODE_MULTI = "multi_thermostat";
+  const CARD_MODE_CANCEL_ALL = "cancel_all";
   const BOOST_TEMP_SUFFIX = "_boost_temperature";
   const BOOST_TIME_SUFFIX = "_boost_time_selector";
   const BOOST_ACTIVE_SUFFIX = "_boost_active";
@@ -84,6 +87,8 @@
       this._bubbleHeaderConfig = null;
       this._mainStack = null;
       this._mainStackConfig = null;
+      this._modeCard = null;
+      this._modeCardType = null;
       this._mainStartButtonRefreshTimer = null;
       this._mainStartButtonRefreshTimers = [];
       this._schedulerLockRefreshTimer = null;
@@ -140,14 +145,20 @@
     static getStubConfig() {
       return {
         type: `custom:${CARD_TYPE}`,
-        use_scheduler_component_card: true,
       };
+    }
+
+    getCardSize() {
+      const mode = this._getCardMode();
+      if (mode === CARD_MODE_CANCEL_ALL) return 1;
+      if (mode === CARD_MODE_MULTI) return 4;
+      if (mode === CARD_MODE_OVERVIEW) return 4;
+      return 1;
     }
 
     setConfig(config) {
       this._config = {
         type: `custom:${CARD_TYPE}`,
-        use_scheduler_component_card: true,
         ...(config || {}),
       };
       window.__thermostatBoostCardLastConfig = this._config;
@@ -155,14 +166,20 @@
       this._resolving = null;
       this._lastBoostActiveState = null;
       this._popupHash = null;
+      this._modeCard = null;
+      this._modeCardType = null;
       this._root.innerHTML = "";
       this._root.appendChild(this._message);
-      this._setMessage("Choose a thermostat to display in this card.");
-      this._ensureResolved();
+      this._renderCurrentMode();
     }
 
     set hass(hass) {
       this._hass = hass;
+      const mode = this._getCardMode();
+      if (mode === CARD_MODE_MULTI || mode === CARD_MODE_CANCEL_ALL) {
+        this._renderCurrentMode();
+        return;
+      }
       const boostActiveEntityId = this._resolved?.boostActiveEntityId;
       const nextBoostActiveState = boostActiveEntityId
         ? this._hass?.states?.[boostActiveEntityId]?.state ?? null
@@ -205,8 +222,111 @@
       this._message.textContent = text;
     }
 
+    _getCardMode() {
+      const mode = this._config?.card_mode;
+      if (typeof mode === "string" && mode.trim()) {
+        return mode.trim();
+      }
+      if (this._config?.device_id || this._config?.entity_id) {
+        return CARD_MODE_OVERVIEW;
+      }
+      return "";
+    }
+
+    _clearOverviewRenderState() {
+      if (this._mainStartButtonRefreshTimer) {
+        clearTimeout(this._mainStartButtonRefreshTimer);
+        this._mainStartButtonRefreshTimer = null;
+      }
+      this._clearMainStartButtonRefreshTimers();
+      if (this._schedulerLockRefreshTimer) {
+        clearTimeout(this._schedulerLockRefreshTimer);
+        this._schedulerLockRefreshTimer = null;
+      }
+      if (this._bubbleHeaderCard?.timer) {
+        clearInterval(this._bubbleHeaderCard.timer);
+        this._bubbleHeaderCard.timer = null;
+      }
+      this._bubbleHeaderCard = null;
+      this._bubbleHeaderConfig = null;
+      this._mainStack = null;
+      this._mainStackConfig = null;
+      this._resolved = null;
+      this._resolving = null;
+      this._lastBoostActiveState = null;
+      this._popupHash = null;
+    }
+
+    _renderCurrentMode() {
+      const mode = this._getCardMode();
+
+      if (mode === CARD_MODE_MULTI || mode === CARD_MODE_CANCEL_ALL) {
+        this._clearOverviewRenderState();
+        this._renderDelegatedMode(mode);
+        return;
+      }
+      this._modeCard = null;
+      this._modeCardType = null;
+
+      if (!this._hass) {
+        this._root.innerHTML = "";
+        this._root.appendChild(this._message);
+        this._setMessage("Waiting for Home Assistant...");
+        return;
+      }
+
+      if (mode !== CARD_MODE_OVERVIEW) {
+        this._clearOverviewRenderState();
+        this._root.innerHTML = "";
+        this._root.appendChild(this._message);
+        this._setMessage("Choose which Thermostat Boost card to display.");
+        return;
+      }
+
+      if (!this._config?.device_id && !this._config?.entity_id) {
+        this._clearOverviewRenderState();
+        this._root.innerHTML = "";
+        this._root.appendChild(this._message);
+        this._setMessage("Choose a thermostat to display in this card.");
+        return;
+      }
+
+      this._ensureResolved();
+    }
+
+    _renderDelegatedMode(mode) {
+      if (!this._hass) {
+        this._root.innerHTML = "";
+        this._root.appendChild(this._message);
+        this._setMessage("Waiting for Home Assistant...");
+        return;
+      }
+
+      const nextType =
+        mode === CARD_MODE_MULTI ? ALL_CARD_TYPE : CANCEL_ALL_CARD_TYPE;
+      if (this._modeCardType !== nextType || !this._modeCard) {
+        this._root.innerHTML = "";
+        const nextCard = document.createElement(nextType);
+        if (typeof nextCard.setConfig === "function") {
+          nextCard.setConfig({
+            type: `custom:${nextType}`,
+          });
+        }
+        this._modeCard = nextCard;
+        this._modeCardType = nextType;
+        this._root.append(nextCard);
+      } else if (!this._root.contains(this._modeCard)) {
+        this._root.innerHTML = "";
+        this._root.append(this._modeCard);
+      }
+      if (this._hass && this._modeCard) {
+        this._modeCard.hass = this._hass;
+      }
+    }
+
     async _ensureResolved() {
       if (!this._hass) return;
+      if (this._getCardMode() !== CARD_MODE_OVERVIEW) return;
       if (!this._config?.device_id && !this._config?.entity_id) return;
       if (this._resolved || this._resolving) return;
 
@@ -2498,7 +2618,7 @@
       this._helper = document.createElement("div");
       this._helper.classList.add("editor-help");
       this._helper.textContent =
-        "Choose a thermostat to display in this card.";
+        "Choose which Thermostat Boost card to add.";
 
       this._warning = document.createElement("div");
       this._warning.classList.add("editor-warning");
@@ -2517,7 +2637,6 @@
     setConfig(config) {
       this._config = {
         type: `custom:${CARD_TYPE}`,
-        use_scheduler_component_card: true,
         ...(config || {}),
       };
       this._renderForm();
@@ -2530,37 +2649,94 @@
 
     _renderForm() {
       if (!this._form || !this._hass) return;
+      const currentMode = this._getCurrentMode();
       this._form.hass = this._hass;
       this._form.computeLabel = (schema) => {
+        if (schema?.name === "card_mode") return "Card type";
         if (schema?.name === "device_id") return "Thermostat";
         if (schema?.name === "use_scheduler_component_card") {
           return "Include Scheduler card";
         }
         return schema?.label || schema?.name || "";
       };
-      this._form.schema = [
+      const schema = [
         {
-          name: "device_id",
+          name: "card_mode",
           selector: {
-            device: {
-              integration: DOMAIN,
-              entity: { domain: "sensor" },
+            select: {
+              mode: "dropdown",
+              options: [
+                { value: "", label: "Choose a card mode" },
+                { value: CARD_MODE_OVERVIEW, label: "Overview card" },
+                {
+                  value: CARD_MODE_MULTI,
+                  label: "Multiple thermostats card",
+                },
+                { value: CARD_MODE_CANCEL_ALL, label: "Cancel all button" },
+              ],
             },
           },
         },
-        {
-          name: "use_scheduler_component_card",
-          selector: {
-            boolean: {},
-          },
-        },
       ];
+      if (currentMode === CARD_MODE_OVERVIEW) {
+        schema.push(
+          {
+            name: "device_id",
+            selector: {
+              device: {
+                integration: DOMAIN,
+                entity: { domain: "sensor" },
+              },
+            },
+          },
+          {
+            name: "use_scheduler_component_card",
+            selector: {
+              boolean: {},
+            },
+          }
+        );
+      }
+      this._form.schema = schema;
       this._form.data = {
-        device_id: this._config?.device_id || "",
-        use_scheduler_component_card:
-          this._config?.use_scheduler_component_card !== false,
+        card_mode: currentMode || "",
+        ...(currentMode === CARD_MODE_OVERVIEW
+          ? {
+              device_id: this._config?.device_id || "",
+              use_scheduler_component_card:
+                this._config?.use_scheduler_component_card !== false,
+            }
+          : {}),
       };
-      this._updateSchedulerWarning();
+      this._helper.textContent = this._helperTextForMode(currentMode);
+      this._updateSchedulerWarning(currentMode);
+    }
+
+    _getCurrentMode() {
+      const mode = this._config?.card_mode;
+      if (typeof mode === "string" && mode.trim()) {
+        return mode.trim();
+      }
+      if (this._config?.device_id || this._config?.entity_id) {
+        return CARD_MODE_OVERVIEW;
+      }
+      return "";
+    }
+
+    _helperTextForMode(mode) {
+      if (!mode) {
+        return "Choose which Thermostat Boost card to add.";
+      }
+      if (mode === CARD_MODE_OVERVIEW) {
+        return "Configure a single thermostat boost card.";
+      }
+      if (mode === CARD_MODE_MULTI) {
+        return "This card lets you boost multiple selected thermostats at once.";
+      }
+      if (mode === CARD_MODE_CANCEL_ALL) {
+        return "This card renders the standalone cancel-all button.";
+      }
+      return "Choose which Thermostat Boost card to add.";
     }
 
     _valueChanged(value) {
@@ -2568,12 +2744,15 @@
       if (!this._config) {
         this._config = {
           type: `custom:${CARD_TYPE}`,
-          use_scheduler_component_card: true,
         };
       }
       const next = { ...this._config };
+      const previousMode = this._getCurrentMode();
 
       if (typeof value === "object" && !Array.isArray(value)) {
+        if ("card_mode" in value) {
+          next.card_mode = value.card_mode;
+        }
         if ("device_id" in value) {
           next.device_id = value.device_id;
         }
@@ -2590,10 +2769,23 @@
         return;
       }
 
-      if (next.use_scheduler_component_card === undefined) {
+      const nextMode =
+        typeof next.card_mode === "string" && next.card_mode.trim()
+          ? next.card_mode.trim()
+          : previousMode;
+      next.card_mode = nextMode;
+
+      if (nextMode !== CARD_MODE_OVERVIEW) {
+        delete next.device_id;
+        delete next.entity_id;
+        delete next.use_scheduler_component_card;
+      } else if (next.use_scheduler_component_card === undefined) {
         next.use_scheduler_component_card = true;
       }
-      delete next.entity_id;
+
+      if (nextMode !== CARD_MODE_OVERVIEW) {
+        delete next.entity_id;
+      }
       if (JSON.stringify(next) === JSON.stringify(this._config)) return;
       this._config = next;
       this.dispatchEvent(
@@ -2603,15 +2795,20 @@
           composed: true,
         })
       );
-      this._updateSchedulerWarning();
+      this._renderForm();
     }
 
-    async _updateSchedulerWarning() {
+    async _updateSchedulerWarning(mode = this._getCurrentMode()) {
       if (!this._warning) return;
       const deviceId = this._config?.device_id;
       const useSchedulerComponentCard =
         this._config?.use_scheduler_component_card !== false;
-      if (!this._hass || !deviceId || useSchedulerComponentCard) {
+      if (
+        !this._hass ||
+        mode !== CARD_MODE_OVERVIEW ||
+        !deviceId ||
+        useSchedulerComponentCard
+      ) {
         this._warning.style.display = "none";
         this._warning.textContent = "";
         return;
@@ -2732,21 +2929,8 @@
     window.customCards.push({
       type: CARD_TYPE,
       name: "Thermostat Boost",
-      description: "Thermostat overview card and boost controls overlay",
-    });
-  }
-  if (!window.customCards.some((card) => card.type === ALL_CARD_TYPE)) {
-    window.customCards.push({
-      type: ALL_CARD_TYPE,
-      name: "Thermostat Boost - multiple thermostats",
-      description: "Apply an offset boost to a number of Thermostat Boost devices",
-    });
-  }
-  if (!window.customCards.some((card) => card.type === CANCEL_ALL_CARD_TYPE)) {
-    window.customCards.push({
-      type: CANCEL_ALL_CARD_TYPE,
-      name: "Thermostat Boost - cancel all button",
-      description: "A button to cancel all active boosts for Thermostat Boost devices. This is kept separate from the other cards so you can place it where it makes sense to you",
+      description:
+        "Thermostat Boost card with overview, multiple thermostat, and cancel-all modes",
     });
   }
 

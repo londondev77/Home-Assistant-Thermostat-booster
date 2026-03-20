@@ -13,6 +13,8 @@ This integration has been designed around my own use case.  I'm happy to take su
 
 ## Changelog
 
+- **1.2.0**
+  - Combined the three separate dashboard cards into one with a selector to choose which one to display.
 - **1.1.0**
   - Added the Track On-Device Changes toggle to handle thermostats with built-in schedules that would otherwise override a boost.
   - Multi-thermostat selection is now persisted per user via backend storage.
@@ -49,7 +51,7 @@ Some thermostats (e.g. Nest) have their own internal schedules that can override
 - Changes to the thermostat via the Home Assistant UI are not tracked in this manner.
 
 ## Screenshots
-### Thermostats summary (cancel all button is a separate card to allow placement anywhere)
+### Thermostats summary
 ![Thermostats summary](https://raw.githubusercontent.com/londondev77/Home-Assistant-Thermostat-booster/refs/heads/main/screenshots/thermostats-summary.png)
 
 ### Thermostat detail overlay
@@ -105,7 +107,7 @@ Repeat for each thermostat you want to control.
 > When the first thermostat entry is created, Thermostat Boost also auto-creates a separate device (`Thermostat Boost Call for Heat`) that provides `binary_sensor.thermostat_boost_call_for_heat_active`.
 > This Call for Heat device cannot be deleted manually while thermostats are still configured in Thermostat Boost. It is removed automatically when all Thermostat Boost thermostats are removed.
 
-## Optional Lovelace Cards
+## Optional Lovelace Card
 
 This repository includes `www/thermostat-boost-card.js`, a custom Lovelace card for:
 
@@ -115,6 +117,14 @@ This repository includes `www/thermostat-boost-card.js`, a custom Lovelace card 
 - Countdown display
 - Display/edit/disable schedules (this can be turned off if you don't use schedules)
 - Enforces some logic by disabling elements when they shouldn't be changed e.g. during a boost
+
+When you add the card to a dashboard, the editor first asks which card mode you want:
+
+- `Overview card`
+- `Multiple thermostats card`
+- `Cancel all button`
+
+The remaining options then change based on that choice.
 
 > [!NOTE]
 > - The Call for Heat toggle is not included on the dashboard card to save space, as it is expected to be changed infrequently. I also want to avoid accidental toggling.
@@ -127,7 +137,7 @@ This repository includes `www/thermostat-boost-card.js`, a custom Lovelace card 
 ### Adding the Lovelace card to dashboard
 1. Edit dashboard and click add card.
 1. Search for the Thermostat Boost card (card picker name: "Thermostat Boost").
-1. Select the device to add. *Only thermostats you've added to the integration will appear in this list*.
+1. Choose the card mode first, then fill in the options that appear.
 1. Click save.
 
 ### Card configuration option
@@ -137,11 +147,12 @@ This repository includes `www/thermostat-boost-card.js`, a custom Lovelace card 
   - When disabled, both the embedded Scheduler card and `Disable Schedules` switch are hidden.
   - If the selected thermostat already has schedules assigned and this option is disabled, the editor shows a warning recommending that Scheduler card is included to avoid confusion.
 
-### Multiple Thermostat Cards
-There are two additional cards that work across multiple Thermostat Boost devices:
+### Card Modes
+The Thermostat Boost card supports three modes:
 
-1. `custom:thermostat-boost-all-card` (card picker: "Thermostat Boost - multiple thermostats") - Apply an offset boost to a number of Thermostat Boost devices.
-1. `custom:thermostat-boost-cancel-all-card` (card picker: "Thermostat Boost - cancel all button") - A button to cancel all active boosts for Thermostat Boost devices, separate so you can place it wherever you want.
+1. `Overview card` - the normal single-thermostat card with popup, boost controls, and schedule options.
+1. `Multiple thermostats card` - the multi-device boost card that applies an offset to the selected Thermostat Boost devices.
+1. `Cancel all button` - the standalone cancel-all control for active boosts.
 
 
 
@@ -161,7 +172,6 @@ The full feature set depends on these Home Assistant add-ons/custom cards:
 
 ## How to use
 ### Simple boost
-UI steps:
 1. Click on the thermostat summary card
 1. Set the boost temperature and duration
 1. Click the `Start Boost` button (this will only be shown when duration is set to a value above 0).
@@ -180,7 +190,7 @@ What happens in the background:
 > [!NOTE]
 > If a single scheduler switch controls multiple thermostats, boosting one thermostat will still toggle that shared scheduler switch and can therefore affect the other thermostats on that schedule.
 
-### Multiple thermostat boost (card)
+### Multiple thermostat boost
 
 1. Select one or more thermostats using the picker at the top of the card.
 1. Set the boost temperature offset and duration.
@@ -188,13 +198,11 @@ What happens in the background:
 
 Notes:
 - The card applies the same offset and duration to all selected thermostats.
-- This card is for starting boosts only. Use the cancel-all card to end active boosts.
+- This card is for starting boosts only. Use the cancel-all mode to end active boosts.
 
-### Cancel all boosts (card)
-This is the standalone cancel button, which appears in the card picker as "Thermostat Boost - cancel all button".
+### Cancel all boosts
+This is the standalone cancel button mode of the Thermostat Boost card.
 
-UI steps:
-1. Add a `custom:thermostat-boost-cancel-all-card` card to your dashboard.
 1. Click `Cancel boost on ALL thermostats` to end any active boosts.
 
 ### Disable Schedules toggle (Long-Term Changes)
