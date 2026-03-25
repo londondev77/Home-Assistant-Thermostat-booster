@@ -1,6 +1,6 @@
 /* Thermostat Boost Lovelace Card */
 (() => {
-  const VERSION = "1.2";
+  const VERSION = "1.3.0";
   const DOMAIN = "thermostat_boost";
   const CARD_TYPE = "thermostat-boost-card";
   const ALL_CARD_TYPE = "thermostat-boost-all-card";

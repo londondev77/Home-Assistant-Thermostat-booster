@@ -16,6 +16,7 @@ from .boost_actions import (
     async_finish_boost_for_entry,
     async_unregister_external_temperature_monitor,
 )
+from .frontend import JSModuleRegistration
 from .const import (
     CONF_CALL_FOR_HEAT_ENABLED,
     CONF_ENTRY_TYPE,
@@ -158,6 +159,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Thermostat Boost from a config entry."""
     entry_type = entry.data.get(CONF_ENTRY_TYPE, ENTRY_TYPE_THERMOSTAT)
     hass.data.setdefault(DOMAIN, {})
+    await JSModuleRegistration(hass).async_register()
     _async_register_picker_ws(hass)
     _cleanup_legacy_aggregate_entity_binding(hass)
 
@@ -241,6 +243,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
             if not _get_thermostat_entries(hass, exclude_entry_id=entry.entry_id):
                 _cleanup_domain_shared_state(hass)
+                await JSModuleRegistration(hass).async_unregister()
             aggregate = hass.data.get(DOMAIN, {}).get("call_for_heat_aggregate_entity")
             if aggregate is not None:
                 aggregate.async_refresh_tracked_entities()
@@ -260,6 +263,8 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         if _get_thermostat_entries(hass):
             await _async_notify_call_for_heat_delete_blocked(hass)
             await _async_ensure_aggregate_entry(hass)
+        else:
+            await JSModuleRegistration(hass).async_unregister()
         return
 
     registry = await async_get_timer_registry(hass)
@@ -269,6 +274,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await async_clear_target_temperature_snapshot(hass, entry.entry_id)
     if not _get_thermostat_entries(hass, exclude_entry_id=entry.entry_id):
         _cleanup_domain_shared_state(hass)
+        await JSModuleRegistration(hass).async_unregister()
         await _async_remove_aggregate_entries(hass)
 
 

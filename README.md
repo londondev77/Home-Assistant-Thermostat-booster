@@ -13,6 +13,8 @@ This integration has been designed around my own use case.  I'm happy to take su
 
 ## Changelog
 
+- **1.3.0**
+  - Bundled the Lovelace card inside the integration so the dashboard card is installed automatically rather than manually.  If you have installed it manually in a previous version, remove the file from your www folder and also delete it in the Manage resources section of Home Assistant.
 - **1.2.0**
   - Combined the three separate dashboard cards into one with a selector to choose which one to display.
 - **1.1.0**
@@ -87,6 +89,9 @@ Some thermostats (e.g. Nest) have their own internal schedules that can override
 1. Install **Thermostat Boost**.
 1. Restart Home Assistant.
 
+> [!NOTE]
+> The bundled Lovelace card is registered automatically after Home Assistant restarts, so no separate card resource step is needed.
+
 
 ## Manual Installation
 1. Copy the thermostat_boost directory to /config/custom_components
@@ -107,9 +112,9 @@ Repeat for each thermostat you want to control.
 > When the first thermostat entry is created, Thermostat Boost also auto-creates a separate device (`Thermostat Boost Call for Heat`) that provides `binary_sensor.thermostat_boost_call_for_heat_active`.
 > This Call for Heat device cannot be deleted manually while thermostats are still configured in Thermostat Boost. It is removed automatically when all Thermostat Boost thermostats are removed.
 
-## Optional Lovelace Card
+## Bundled Lovelace Card
 
-This repository includes `www/thermostat-boost-card.js`, a custom Lovelace card for:
+This repository includes `custom_components/thermostat_boost/frontend/thermostat-boost-card.js`, a bundled custom Lovelace card for:
 
 - Thermostat summary
 - Boost time/temperature controls
@@ -131,13 +136,10 @@ The remaining options then change based on that choice.
 > - You can change this setting from the thermostat Device Info page in **Settings -> Devices & Services**.
 > - The "Track On-Device Changes" switch is also available there. When enabled, on-device setpoint changes during a boost are captured and restored when the boost ends.
 
-### Installing the Lovelace card
-[Click here for instructions on how to install the Lovelace card](https://developers.home-assistant.io/docs/frontend/custom-ui/registering-resources).
-
 ### Adding the Lovelace card to dashboard
 1. Edit dashboard and click add card.
 1. Search for the Thermostat Boost card (card picker name: "Thermostat Boost").
-1. Choose the card mode first, then fill in the options that appear.
+1. Choose the card mode first, then fill in the options that appear. If the card does not appear immediately after install, refresh the page once Home Assistant has restarted.
 1. Click save.
 
 ### Card configuration option
@@ -162,13 +164,13 @@ The full feature set depends on these Home Assistant add-ons/custom cards:
 
 | Dependency | Required for | Why it is needed | GitHub |
 |---|---|---|---|
-| Bubble Card | Required if using `www/thermostat-boost-card.js` | The custom card renders with `custom:bubble-card` (header + pop-up views) | https://github.com/Clooos/Bubble-Card |
+| Bubble Card | Required if using the bundled Lovelace card | The custom card renders with `custom:bubble-card` (header + pop-up views) | https://github.com/Clooos/Bubble-Card |
 | Scheduler Component | Optional | Provides scheduler functionality to the thermostat.  | https://github.com/nielsfaber/scheduler-component |
 | Scheduler Card | Optional | Used to show/edit thermostat schedules created by the Scheduler Component | https://github.com/nielsfaber/scheduler-card |
-| Slider Entity Row | Required if using `www/thermostat-boost-card.js` | Boost time/temperature controls use `custom:slider-entity-row`. I did try using the built-in tile card to do this but I didn't like the way the grabber disappeared when set to minimum - this felt confusing. | https://github.com/thomasloven/lovelace-slider-entity-row |
+| Slider Entity Row | Required if using the bundled Lovelace card | Boost time/temperature controls use `custom:slider-entity-row`. I did try using the built-in tile card to do this but I didn't like the way the grabber disappeared when set to minimum - this felt confusing. | https://github.com/thomasloven/lovelace-slider-entity-row |
 
 > [!NOTE]
-> - If you do not use `www/thermostat-boost-card.js`, Bubble Card / Scheduler Card / Slider Entity Row are not required for backend services to run.
+> - If you do not use the bundled Lovelace card, Bubble Card / Scheduler Card / Slider Entity Row are not required for backend services to run.
 
 ## How to use
 ### Simple boost
