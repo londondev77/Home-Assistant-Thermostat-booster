@@ -1,7 +1,7 @@
 {
   "domain": "thermostat_boost",
   "name": "Thermostat Boost",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "config_flow": true,
   "import_executor": true,
   "documentation": "https://github.com/londondev77/Home-Assistant-Thermostat-booster",

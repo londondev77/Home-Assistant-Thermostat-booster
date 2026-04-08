@@ -13,6 +13,9 @@ This integration has been designed around my own use case.  I'm happy to take su
 
 ## Changelog
 
+- **1.4.0**
+  - Added multi-thermostat card configuration to show/hide thermostats and enable reordering.
+  - Added per-card picker persistence scoping so multiple multi-thermostat cards can have independent saved picker states.
 - **1.3.0**
   - Bundled the Lovelace card inside the integration so the dashboard card is installed automatically rather than manually.  If you have installed it manually in a previous version, remove the file from your www folder and also delete it in the Manage resources section of Home Assistant.
 - **1.2.0**
@@ -156,6 +159,21 @@ The Thermostat Boost card supports three modes:
 1. `Multiple thermostats card` - the multi-device boost card that applies an offset to the selected Thermostat Boost devices.
 1. `Cancel all button` - the standalone cancel-all control for active boosts.
 
+### Multiple Thermostats Card Setup
+
+1. Add the `Thermostat Boost` card and set `Card type` to `Multiple thermostats card`.
+1. In the editor list, use the toggle beside each thermostat to show/hide it on that card.
+1. Drag thermostats using the handle to set the order shown on that card.
+1. Save the card. 
+
+`Card ID` behaviour:
+
+- `Card ID` controls saved picker states for the card.
+- If another card already uses the same `Card ID`, shared saved states may cause unexpected behaviour.
+- If this is a duplicated card (and not the original), give it a different `Card ID` unless you intentionally want shared saved states.
+- Intentionally shared saved states can be useful if you want the same card in two different places on your dashboard.
+- The editor only surfaces `Card ID` guidance when a duplicate saved `Card ID` is detected.
+
 
 
 ## Dependencies
@@ -200,6 +218,7 @@ What happens in the background:
 
 Notes:
 - The card applies the same offset and duration to all selected thermostats.
+- Thermostats hidden in the card configuration are not shown in the picker and are not included in a multi-boost.
 - This card is for starting boosts only. Use the cancel-all mode to end active boosts.
 
 ### Cancel all boosts

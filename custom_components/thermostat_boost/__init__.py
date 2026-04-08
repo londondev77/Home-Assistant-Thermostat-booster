@@ -56,6 +56,21 @@ _PICKER_STORAGE_KEY = f"{DOMAIN}.picker_selection"
 _PICKER_WS_GET = f"{DOMAIN}/picker/get_selection"
 _PICKER_WS_SET = f"{DOMAIN}/picker/set_selection"
 _PICKER_WS_REGISTERED = "picker_ws_registered"
+_PICKER_DEFAULT_SCOPE_ID = "default"
+
+
+def _normalize_picker_scope_id(scope_id: str | None) -> str:
+    if not isinstance(scope_id, str):
+        return _PICKER_DEFAULT_SCOPE_ID
+    trimmed = scope_id.strip()
+    if not trimmed:
+        return _PICKER_DEFAULT_SCOPE_ID
+    cleaned = "".join(
+        char if (char.isalnum() or char in {"_", "-"}) else "_"
+        for char in trimmed
+    )
+    cleaned = cleaned[:64].strip("_")
+    return cleaned or _PICKER_DEFAULT_SCOPE_ID
 
 
 def _get_picker_store(hass: HomeAssistant) -> Store:
@@ -96,6 +111,7 @@ def _async_register_picker_ws(hass: HomeAssistant) -> None:
     {
         vol.Required("type"): _PICKER_WS_GET,
         vol.Optional("user_id"): str,
+        vol.Optional("scope_id"): str,
     }
 )
 @websocket_api.async_response
@@ -107,13 +123,23 @@ async def _ws_get_picker_selection(hass: HomeAssistant, connection, msg) -> None
         connection.send_error(msg["id"], "no_user", "User not available")
         return
 
+    scope_id = _normalize_picker_scope_id(msg.get("scope_id"))
     data = await _async_get_picker_data(hass)
     users = data.get("users")
     selection = {}
     if isinstance(users, dict):
         entry = users.get(user_id)
         if isinstance(entry, dict):
-            selection = entry.get("selection") or {}
+            scopes = entry.get("scopes")
+            if isinstance(scopes, dict):
+                scope_entry = scopes.get(scope_id)
+                if isinstance(scope_entry, dict):
+                    selection = scope_entry.get("selection") or {}
+            if (
+                scope_id == _PICKER_DEFAULT_SCOPE_ID
+                and (not isinstance(selection, dict) or not selection)
+            ):
+                selection = entry.get("selection") or {}
     if not isinstance(selection, dict):
         selection = {}
 
@@ -124,6 +150,7 @@ async def _ws_get_picker_selection(hass: HomeAssistant, connection, msg) -> None
     {
         vol.Required("type"): _PICKER_WS_SET,
         vol.Optional("user_id"): str,
+        vol.Optional("scope_id"): str,
         vol.Required("selection"): dict,
     }
 )
@@ -136,6 +163,7 @@ async def _ws_set_picker_selection(hass: HomeAssistant, connection, msg) -> None
         connection.send_error(msg["id"], "no_user", "User not available")
         return
 
+    scope_id = _normalize_picker_scope_id(msg.get("scope_id"))
     selection_in = msg.get("selection") or {}
     cleaned = {}
     if isinstance(selection_in, dict):
@@ -149,7 +177,17 @@ async def _ws_set_picker_selection(hass: HomeAssistant, connection, msg) -> None
     if not isinstance(users, dict):
         users = {}
         data["users"] = users
-    users[user_id] = {"selection": cleaned}
+    user_entry = users.get(user_id)
+    if not isinstance(user_entry, dict):
+        user_entry = {}
+    scopes = user_entry.get("scopes")
+    if not isinstance(scopes, dict):
+        scopes = {}
+    scopes[scope_id] = {"selection": cleaned}
+    user_entry["scopes"] = scopes
+    if scope_id == _PICKER_DEFAULT_SCOPE_ID:
+        user_entry["selection"] = cleaned
+    users[user_id] = user_entry
     await _async_save_picker_data(hass, data)
 
     connection.send_result(msg["id"], {"ok": True})

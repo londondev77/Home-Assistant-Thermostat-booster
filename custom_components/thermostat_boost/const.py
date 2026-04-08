@@ -1,7 +1,7 @@
 """Constants for the Thermostat Boost integration."""
 
 DOMAIN = "thermostat_boost"
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 
 CONF_THERMOSTAT = "thermostat"
 CONF_ENTRY_TYPE = "entry_type"
