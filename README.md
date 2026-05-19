@@ -13,6 +13,9 @@ This integration has been designed around my own use case.  I'm happy to take su
 
 ## Changelog
 
+- **1.5.0**
+  - Updated popups to match the new Bubble Cards structure.
+  - **NB:** Bubble Card `v3.2.0` or newer is required.
 - **1.4.0**
   - Added multi-thermostat card configuration to show/hide thermostats and enable reordering.
   - Added per-card picker persistence scoping so multiple multi-thermostat cards can have independent saved picker states.
