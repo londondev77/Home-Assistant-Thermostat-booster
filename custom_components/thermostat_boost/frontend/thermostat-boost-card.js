@@ -650,48 +650,9 @@
         slider_value_position: "right",
       };
 
-      if (!showInlinePopupPreview) {
-        cards.push({
-          type: "custom:bubble-card",
-          card_type: "pop-up",
-          hash: navAnchor,
-          name: resolved.label || "Thermostat",
-          icon: "mdi:home-thermometer",
-          show_header: true,
-          button_type: "name",
-          sub_button: {
-            main: [],
-            bottom: [],
-          },
-          styles: `
-            \${(() => {
-              const thermostatState = hass.states['${resolved.thermostatEntityId}'];
-              const thermostatIcon = thermostatState?.attributes?.icon || 'mdi:home-thermometer';
-              const headerIcon =
-                card.querySelector('.bubble-header .bubble-icon ha-icon') ||
-                card.querySelector('.bubble-header .bubble-icon');
-              if (!headerIcon) return '';
-              if ('icon' in headerIcon) {
-                headerIcon.icon = thermostatIcon;
-              } else {
-                headerIcon.setAttribute('icon', thermostatIcon);
-              }
-              return '';
-            })()}
-          `,
-          slider_fill_orientation: "left",
-          slider_value_position: "right",
-        });
-      } else {
-        cards.push({
-          type: "heading",
-          icon: "mdi:card-text-outline",
-          heading_style: "title",
-          heading: "Popup preview",
-        });
-      }
+      const popupCards = [];
 
-      cards.push({
+      popupCards.push({
         type: "thermostat",
         entity: resolved.thermostatEntityId,
         show_current_as_primary: true,
@@ -707,7 +668,7 @@
         ],
       });
 
-      cards.push({
+      popupCards.push({
         type: "heading",
         icon: "mdi:rocket-launch",
         heading_style: "title",
@@ -715,7 +676,7 @@
       });
 
       if (resolved.boostTemperatureEntityId) {
-        cards.push({
+        popupCards.push({
           type: "conditional",
           conditions: [
             {
@@ -744,7 +705,7 @@
       }
 
       if (resolved.boostTimeEntityId) {
-        cards.push({
+        popupCards.push({
           type: "conditional",
           conditions: [
             {
@@ -773,7 +734,7 @@
       }
 
       if (resolved.boostActiveEntityId && resolved.boostFinishEntityId) {
-        cards.push({
+        popupCards.push({
           type: "conditional",
           conditions: [
             {
@@ -819,7 +780,7 @@
       }
 
       if (resolved.boostTimeEntityId && resolved.boostFinishEntityId) {
-        cards.push({
+        popupCards.push({
           type: "conditional",
           conditions: [
             {
@@ -866,7 +827,7 @@
       }
 
       if (useSchedulerComponentCard && resolved.scheduleOverrideEntityId) {
-        cards.push({
+        popupCards.push({
           type: "tile",
           entity: resolved.scheduleOverrideEntityId,
           name: "Disable Schedules",
@@ -888,7 +849,7 @@
       }
 
       if (useSchedulerComponentCard && resolved.thermostatEntityId) {
-        cards.push({
+        popupCards.push({
           type: "custom:scheduler-card",
           include: [resolved.thermostatEntityId],
           display_options: {
@@ -903,6 +864,51 @@
           title: false,
           default_editor: "scheme",
         });
+      }
+
+      if (!showInlinePopupPreview) {
+        cards.push({
+          type: "custom:bubble-card",
+          card_type: "pop-up",
+          hash: navAnchor,
+          name: resolved.label || "Thermostat",
+          icon: "mdi:home-thermometer",
+          show_header: true,
+          button_type: "name",
+          popup_style: "classic",
+          card_layout: "large",
+          sub_button: {
+            main: [],
+            bottom: [],
+          },
+          cards: popupCards,
+          styles: `
+            \${(() => {
+              const thermostatState = hass.states['${resolved.thermostatEntityId}'];
+              const thermostatIcon = thermostatState?.attributes?.icon || 'mdi:home-thermometer';
+              const headerIcon =
+                card.querySelector('.bubble-header .bubble-icon ha-icon') ||
+                card.querySelector('.bubble-header .bubble-icon');
+              if (!headerIcon) return '';
+              if ('icon' in headerIcon) {
+                headerIcon.icon = thermostatIcon;
+              } else {
+                headerIcon.setAttribute('icon', thermostatIcon);
+              }
+              return '';
+            })()}
+          `,
+          slider_fill_orientation: "left",
+          slider_value_position: "right",
+        });
+      } else {
+        cards.push({
+          type: "heading",
+          icon: "mdi:card-text-outline",
+          heading_style: "title",
+          heading: "Popup preview",
+        });
+        cards.push(...popupCards);
       }
 
       this._mainStackConfig = {
