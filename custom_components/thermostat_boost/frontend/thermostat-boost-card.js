@@ -3686,6 +3686,35 @@
     );
   }
 
+  const getThermostatBoostDeviceIdForEntity = (hass, entityId) => {
+    if (!hass || !entityId) {
+      return null;
+    }
+
+    const entityEntry = hass.entities?.[entityId];
+    const deviceId = entityEntry?.device_id;
+    if (!deviceId) return null;
+
+    const devices = hass.devices;
+    const deviceEntries = Array.isArray(devices)
+      ? devices
+      : devices && typeof devices === "object"
+        ? Object.values(devices)
+        : [];
+    const device = deviceEntries.find((entry) => entry?.id === deviceId);
+    if (!device) return null;
+
+    const identifiers = Array.isArray(device?.identifiers)
+      ? device.identifiers
+      : [];
+    const isThermostatBoostDevice = identifiers.some(
+      (identifier) =>
+        Array.isArray(identifier) &&
+        identifier[0] === DOMAIN
+    );
+    return isThermostatBoostDevice ? deviceId : null;
+  };
+
   window.customCards = window.customCards || [];
   if (!window.customCards.some((card) => card.type === CARD_TYPE)) {
     window.customCards.push({
@@ -3693,6 +3722,20 @@
       name: "Thermostat Boost",
       description:
         "Thermostat Boost card with overview, multiple thermostat, and cancel-all modes",
+      getEntitySuggestion: (hass, entityId) => {
+        const deviceId = getThermostatBoostDeviceIdForEntity(hass, entityId);
+        if (!deviceId) {
+          return null;
+        }
+
+        return {
+          config: {
+            type: `custom:${CARD_TYPE}`,
+            card_mode: CARD_MODE_OVERVIEW,
+            device_id: deviceId,
+          },
+        };
+      },
     });
   }
 
